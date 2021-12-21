@@ -174,3 +174,26 @@ dr.print_coordinates()
 #          = RA_zod + AD2_zod
 # OD2_zod: Oblique Descension of zodiac longitude (type 2)
 #          = RA_zod - AD2_zod
+
+
+# To transfer arc to years you may use one of the methods blow:
+# .get_years_ptolemey(arc: float) Ptolemy methos
+# .get_years_naibod(arc) Naibod method
+# .get_years_simmonite(arc) Simmonite method
+# .get_years_placidus(arc) Placidus method
+# .get_years_ascendant_arc(arc) Ascendant Arc method
+# .get_years_vertical_arc(arc) Vertical Arc method
+# Example
+
+arc = dr.aspect_field_plane(
+    promissor=dr.planet[0],  # The Sun
+    significator=dr.planet[6],  # Saturn
+    planetary_orbit=1,
+    option=1,  # Saturn's parallel in placiduus system
+)
+
+years = dr.get_years_ascendant_arc(arc)
+print('Moon || Saturn (degrees):', arc)
+print('Moon || Saturn (years of life):', years)
+print('It corresponds to:', dr.years_to_date(years))
+# Prints '1986, November'

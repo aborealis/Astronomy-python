@@ -82,3 +82,20 @@ aspect_field_plane(
 ```
 
 A complete list of extra options for primary direction methods is described in `directions_API_explained.py` file
+
+#### 1.1.3. Astrological Calculations
+
+Finally, you may translate the arc of directions to the year of life (start point is the date, used to declare the object).
+
+```python
+dr.get_years_naibod(33.54)
+# gives 34.03 years
+```
+
+You may add this time delta to initial data to see the timing:
+
+```python
+dr.years_to_date(34.03)
+# gives sting output '1982, November'
+```
+Full list of methods to express arc in yesrs is described in `directions_API_explained.py` file
