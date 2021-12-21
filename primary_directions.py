@@ -651,7 +651,7 @@ class Directions:
         _lon = self.__get_eclipt_lon(_ra, dec=0.0)
         if _lon < 0:
             _lon += 360
-        _time_to_travel = self.__travel_time_to_ecl_lat(planet=1,
+        _time_to_travel = self.__travel_time_to_ecl_lat(planet=0,
                                                         target_lon=_lon,
                                                         step=1)
         return _time_to_travel
@@ -669,7 +669,7 @@ class Directions:
             _target_lon += 360
 
         _time_to_travel = self.__travel_time_to_ecl_lat(
-            planet=1,
+            planet=0,
             target_lon=_target_lon,
             step=1
         )
@@ -697,7 +697,7 @@ class Directions:
             _target_lon += 360
 
         _time_to_travel = self.__travel_time_to_ecl_lat(
-            planet=1,
+            planet=0,
             target_lon=_target_lon,
             step=1
         )
