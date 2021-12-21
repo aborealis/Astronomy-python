@@ -19,6 +19,7 @@ class Directions:
     Coords = namedtuple('Coords', [
         'lon',  # эклиптическая долгота
         'lat',  # небесная широта (в эклиптической системе)
+        'max_ecl_speed',  # средняя эклиптическая скорость (для планет)
         'RA',   # Прямое восхождение
         'dec',  # Склонение
         'AD',  # Разница восхождений до горизонта (на экваторе и на широте)
@@ -81,10 +82,21 @@ class Directions:
 
         # Задаем экваториальные данные для планет
         self.planet = []
-        for _p in range(10):
+        for _p, _max_speed in enumerate([
+            1.0197905235424334,  # Sun
+            15.391811060863061,  # Moon
+            2.202957566153169,  # Merc
+            1.25890306853398,  # Venus
+            0.7913933948763741,  # Mars
+            0.24246019880425115,  # Jupiter
+            0.13266330060580733,  # Saturn
+            0.06470421363975136,
+            0.04225855279702155,
+            0.040509615350373694
+        ]):
             _lon, _lat = swe.calc_ut(self.jday, _p)[0][:2]
             self.planet.append(
-                self.get_equatorial_data(_lon, _lat)
+                self.get_equatorial_data(_lon, _lat, max_ecl_speed=_max_speed)
             )
 
         # Задаем экваториальные данные для домов
@@ -158,9 +170,10 @@ class Directions:
 
     def get_equatorial_data(self,
                             lon: float,
-                            lat: float) -> Coords:
+                            lat: float,
+                            max_ecl_speed: float = 0) -> Coords:
         """
-        Вычисляет экваторианоьные данные по заданным
+        Вычисляет экваториальные данные по заданным
         эклиптическим координатам
         """
 
@@ -220,6 +233,7 @@ class Directions:
         return self.Coords(
             lon=lon,
             lat=lat,
+            max_ecl_speed=max_ecl_speed,
             dec=_dec,
             RA=_ra,
             AD=_ad,
@@ -280,6 +294,46 @@ class Directions:
         elif _c > 1:
             _c = 1
         return asin(_c) / pi * 180
+
+    def __get_eclipt_lon(self,
+                         _ra: float,
+                         _dec: float) -> float:
+        """
+        Возвращает эклиптическую долготу по экваториальным координатам
+        """
+        _lon = atan(
+            (
+                sin(_ra/180*pi) * cos(self.earth_angle/180 * pi) +
+                tan(_dec/180*pi) * sin(self.earth_angle/180*pi)
+            ) / cos(_ra/180*pi)
+        ) / pi * 180
+
+        # Корректировка неопределенности функции arctan
+        if _ra == 90:
+            _lon = 90
+        elif _ra == 270:
+            _lon = 270
+        elif 90 < _ra < 270:
+            _lon += 180
+        elif 270 < _ra < 360:
+            _lon += 360
+
+        if _lon < 0:
+            _lon += 360
+        elif _lon > 360:
+            _lon -= 360
+
+        return _lon
+
+    # def __get_lat(self,
+    #               ra: float,
+    #               dec: float) -> float:
+    #     """
+    #     Возвращает небесную широту по экваториальным координатам
+    #     """
+    #     return asin(sin(dec/180*pi) * cos(self.earth_angle/180*pi) -
+    #                 cos(dec/180*pi) * sin(self.earth_angle/180*pi) *
+    #                 sin(ra/180*pi)) / pi * 180
 
     def print_coordinates(self) -> None:
         """
@@ -416,37 +470,57 @@ class Directions:
                        option: int = 0) -> float:
         """
         Возвращает зодиакальный аспект (по заданным
-        градусам - 30, 60, 90 и т.д.)
+        градусам - 30, 60, 90 и т.д.). Options
+        принимает те же значения, что и в методе
+        aspect_mundi()
         """
-        _new_lon = self.smart_add(promissor.lon, abs(aspect))
+        if option == 3:
+            _new_lon = self.__get_vertex_lon(promissor)
+        else:
+            _new_lon = self.smart_add(promissor.lon, abs(aspect))
         _new_promissor = self.get_equatorial_data(lon=_new_lon, lat=0.0)
-        return self.aspect_mundi(_new_promissor, significator, option)
+        return self.aspect_mundi(_new_promissor,
+                                 significator,
+                                 option=option)
 
     def aspect_field_plane(self,
                            promissor: Coords,
                            significator: Coords,
                            planetary_orbit: int,
-                           aspect: int = 0):
+                           aspect: int = 0,
+                           option: int = 0):
         """
         Возвращает орбитальный аспект (по заданным
         градусам - 30, 60, +90 и т.д.) по орбите
-        заданной планеты (0..9 - Солнце-Плутон)
+        заданной планеты (0..9 - Солнце-Плутон).
+        Options принимает те же значения, что и в
+        методе aspect_mundi()
         """
-        _target_lon = self.smart_add(promissor.lon, abs(aspect))
+
+        if option == 3:
+            _target_lon = self.__get_vertex_lon(promissor)
+            # return _target_lon
+        else:
+            _target_lon = self.smart_add(promissor.lon, abs(aspect))
 
         # Находим момент времени, когда промиссор
         # окажется в новом положении
         _day = 0
+        if promissor.max_ecl_speed:
+            _step = 1 / promissor.max_ecl_speed
+        else:
+            _step = 1
         while True:
             _lon1 = swe.calc_ut(self.jday + _day, planetary_orbit)[0][0]
-            _lon2 = swe.calc_ut(self.jday + _day + 1, planetary_orbit)[0][0]
-            if _lon1 < _target_lon < _lon2:
+            _lon2 = swe.calc_ut(self.jday + _day + _step,
+                                planetary_orbit)[0][0]
+            if _lon1 < _target_lon < _lon2 and abs(_lon2 - _lon1) < 30:
                 break
-            _day += 1
+            _day += _step
 
         # Метод дихотомии
         _a = _day
-        _b = _day + 1
+        _b = _day + _step
         while True:
             _c = _a + (_b - _a)/2
             _lon_a = swe.calc_ut(
@@ -468,5 +542,22 @@ class Directions:
 
         return self.aspect_mundi(
             promissor=_new_promissor,
-            significator=significator
+            significator=significator,
+            option=option
         )
+
+    def __get_vertex_lon(self, promissor: Coords) -> float:
+        """
+        Находит эклиптическую долготу вертекса/антивертекса
+        (что ближе к промиссору) по экваториальным координатам
+        промиссора
+        """
+
+        # Если соединяем с антивертексом
+        # (промиссор на вотоке)
+        if promissor.quadrant in [1, 4]:
+            _ra = self.sphere.RAMC + 90 - promissor.AD2
+        else:
+            _ra = self.sphere.RAMC - 90 - promissor.AD2
+        _dec = promissor.dec
+        return self.__get_eclipt_lon(_ra, _dec)

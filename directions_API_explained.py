@@ -108,6 +108,8 @@ print('Sun Trin Merc (zodiaco):', dr.aspect_zodiaco(
 ))
 
 # And you also can get field-plane directions
+# It accepsts the same options as .aspect_mundi()
+# method above
 
 print('Mon Trin Sat (field plane):', dr.aspect_field_plane(
     promissor=dr.planet[1],
