@@ -5,10 +5,7 @@ It requires the swisseph library to
 be installed: pip install pyswisseph
 """
 from collections import namedtuple
-from functools import singledispatch
 from math import tan, sin, cos, asin, atan, pi
-from os import spawnl
-from types import TracebackType
 import swisseph as swe
 
 
@@ -29,10 +26,9 @@ class Directions:
 
         self.__sin_e = sin(self.__inclination_ecliptic() / 180 * pi)
         self.__cos_e = cos(self.__inclination_ecliptic() / 180 * pi)
-        self.__sin_phi = sin(data['lat'] / 180 * pi)
-        self.__cos_phi = cos(data['lat'] / 180 * pi)
         self.__tan_phi = tan(data['lat'] / 180 * pi)
 
+        # A list of house cusps longitudes
         cusps = swe.houses(
             self.jday,
             data['lat'],
@@ -40,11 +36,13 @@ class Directions:
             bytes("P", "ascii")
         )[0]
 
+        # Real ascension MC
         self.RAMC = self.__ra_dec_from_lon_lat(
             lon_ecl=cusps[9],
             lat_ecl=0.0
         ).horz_angle
 
+        # Real ascension IC
         self.RAIC = self.add_360(self.RAMC, 180)
 
         self.planet = []
@@ -54,6 +52,7 @@ class Directions:
             'NEP', 'PLT', 'SNO',
         ]
         for planet_num, planet_name in enumerate(self.__planet_names):
+            # Ecliptical lon/lat
             lon, lat = swe.calc_ut(self.jday, planet_num)[0][:2]
             lat = lat if planet_num else 0.0
             self.planet.append(self.set_object(planet_name, lon, lat))
@@ -67,7 +66,6 @@ class Directions:
                 lat_ecl=0.0
             ))
 
-        self.__geo_lon = data['lon']
         self.__geo_lat = data['lat']
 
     Point_Cartasian = namedtuple(
@@ -91,16 +89,23 @@ class Directions:
             'UMD', 'LMD',  # Upper/Lower meridian dist.
             'DSA', 'NSA',  # Day/Night semi-arc
             'quadrant',  # 1,2 -under horison, 4,1 - west
+            'OA',  # Oblique ascention (time to ASC)
         ]
     )
 
     @staticmethod
     def add_360(deg1: float, deg2: float) -> float:
+        """
+        Adds two degrees in 360 degree circle
+        """
         summ = deg1 + deg2
         return summ if summ < 360 else 360 - summ
 
     @staticmethod
-    def extract_360(deg1: float, deg2: float) -> float:
+    def substract_360(deg1: float, deg2: float) -> float:
+        """
+        subtracts 2 numbers two degrees in 360 degree circle
+        """
         diff = deg1 - deg2
         return diff if diff > 0 else 360 + diff
 
@@ -126,10 +131,9 @@ class Directions:
             0.001811 / 3600 * julian_era ** 3
         )
 
-    def __xyz_eqt_from_xyz_ecl(
-        self,
-        point: Point_Cartasian
-    ) -> Point_Cartasian:
+    def __xyz_eqt_from_xyz_ecl(self,
+                               point: Point_Cartasian
+                               ) -> Point_Cartasian:
         """
         Transfers XYZ from ecliptic to XYZ equator plane
         x_eqt directed to the vernal equinox
@@ -142,10 +146,9 @@ class Directions:
 
         return self.Point_Cartasian(x_eqt, y_eqt, z_eqt)
 
-    def __xyz_ecl_from_xyz_eqt(
-        self,
-        point: Point_Cartasian
-    ) -> Point_Cartasian:
+    def __xyz_ecl_from_xyz_eqt(self,
+                               point: Point_Cartasian
+                               ) -> Point_Cartasian:
         """
         Transfers XYZ from equator to XYZ ecliptic plane.
         x_ecl directed to 0° Aries
@@ -178,10 +181,9 @@ class Directions:
 
         return self.Point_Cartasian(x_ecl, y_ecl, z_ecl)
 
-    def __lon_lat_from_xyz(
-        self,
-        point: Point_Cartasian
-    ) -> Point_Spherical:
+    def __lon_lat_from_xyz(self,
+                           point: Point_Cartasian
+                           ) -> Point_Spherical:
         """
         Transfers XYZ from a given plane to lon
         and lat of the same plane (in degrees)
@@ -213,34 +215,34 @@ class Directions:
 
     def __lon_lat_from_ra_dec(self,
                               r_asc: float,
-                              dec: float) -> Point_Spherical:
+                              decl: float) -> Point_Spherical:
         """
         Transfers real ascension & dec from eqt, plane
         lon & lat in ecliptic plane (in degrees)
         """
         return self.__lon_lat_from_xyz(
             self.__xyz_ecl_from_xyz_eqt(
-                self.__xyz_from_lat_lon(r_asc, dec)
+                self.__xyz_from_lat_lon(r_asc, decl)
             )
         )
 
-    def __ad_from_dec(self, dec: float) -> float:
+    def __ad_from_dec(self, decl: float) -> float:
         """
         Returns ascension difference (in degrees)
         of horizon raising of celestial body from
         its declination. AD = on geo latitude 0
         """
         return asin(self.__tan_phi *
-                    tan(dec/180*pi)) / pi * 180
+                    tan(decl/180*pi)) / pi * 180
 
-    def __ad2_from_dec(self, dec: float) -> float:
+    def __ad2_from_dec(self, decl: float) -> float:
         """
         Returns ascension difference (in degrees)
         of celestial body crossing prime vertical
         from the body's declination. AD2 = 0 on
         geo latitude 0 (earth equator)
         """
-        ratio = tan(dec/180*pi) / self.__tan_phi
+        ratio = tan(decl/180*pi) / self.__tan_phi
 
         # Mathematically abs(ratio) cannot exceed 1,
         # but computationally it can by small value.
@@ -255,12 +257,12 @@ class Directions:
     def set_object_eqt(self,
                        name: str,
                        r_asc: float,
-                       dec: float) -> Celestial_Object:
+                       decl: float) -> Celestial_Object:
         """
         Create Celestial Object from
         equatorial coordinates
         """
-        lon_ecl, lat_ecl = self.__lon_lat_from_ra_dec(r_asc, dec)
+        lon_ecl, lat_ecl = self.__lon_lat_from_ra_dec(r_asc, decl)
 
         return self.set_object(name, lon_ecl, lat_ecl)
 
@@ -272,10 +274,13 @@ class Directions:
         Create Celestial Object from
         ecliptical coordinates
         """
+        # See Celestial_Object named tuple
+        # definition above for reference on
+        # astronomical data prepared here
         xyz_ecl = self.__xyz_from_lat_lon(lon_ecl, lat_ecl)
         xyz_eqt = self.__xyz_eqt_from_xyz_ecl(xyz_ecl)
-        r_asc, dec = self.__lon_lat_from_xyz(xyz_eqt)
-        asc_diff = self.__ad_from_dec(dec)
+        r_asc, decl = self.__lon_lat_from_xyz(xyz_eqt)
+        asc_diff = self.__ad_from_dec(decl)
 
         upper_md = self.shortest_distance(self.RAMC, r_asc)
         lower_md = self.shortest_distance(self.RAIC, r_asc)
@@ -285,7 +290,7 @@ class Directions:
         day_sa = 90 + asc_diff
         night_sa = 90 - asc_diff
 
-        # Above ar below the horizon
+        # If celestial object above or below the horizon
         if upper_md > day_sa or lower_md < night_sa:
             above_horizon = False
         else:
@@ -312,68 +317,68 @@ class Directions:
             y_eqt=xyz_eqt.y,
             z_eqt=xyz_eqt.z,
             RA=r_asc,
-            D=dec,
+            D=decl,
             lon=lon_ecl,
             lat=lat_ecl,
             AD=asc_diff,
-            AD2=self.__ad2_from_dec(dec),
+            AD2=self.__ad2_from_dec(decl),
             UMD=upper_md,
             LMD=lower_md,
             DSA=day_sa,
             NSA=night_sa,
             quadrant=quadrant,
+            OA=r_asc - asc_diff,
         )
 
     def create_vertex(self,
-                      object: Celestial_Object) -> Celestial_Object:
+                      obj: Celestial_Object) -> Celestial_Object:
         """
         Creates Celestal object for vertex point
         (cross of day circle of a given celestial
         object with western part of prime meridian)
         """
-
-        dec = object.D
-        r_asc = self.RAMC - 90 + object.AD2
-        return self.set_object_eqt('VTX', r_asc, dec)
+        decl = obj.D
+        r_asc = self.RAMC - 90 + obj.AD2
+        return self.set_object_eqt('VTX', r_asc, decl)
 
     def create_antivertex(self,
-                          object: Celestial_Object) -> Celestial_Object:
+                          obj: Celestial_Object) -> Celestial_Object:
         """
         Creates Celestal object for a-vertex point
         (cross of day circle of a given celestial
         object with eastern part of prime meridian)
         """
 
-        dec = object.D
-        r_asc = self.RAMC + 90 - object.AD2
-        return self.set_object_eqt('VTX', r_asc, dec)
+        decl = obj.D
+        r_asc = self.RAMC + 90 - obj.AD2
+        return self.set_object_eqt('VTX', r_asc, decl)
 
     def create_parallel(self,
-                        object: Celestial_Object) -> Celestial_Object:
+                        obj: Celestial_Object) -> Celestial_Object:
         """
-        Creates Celestal object which is in parallel
-        with a given one in Placidua system
+        Creates Celestal object paralleled
+        to a given one in Placidua system
         """
-        dec = object.D
-        if abs(object.RA - (object.UMD + self.RAMC)) < 1e-10:
-            r_asc = self.extract_360(self.RAMC, object.UMD)
+        decl = obj.D
+        if abs(obj.RA - (obj.UMD + self.RAMC)) < 1e-10:
+            r_asc = self.substract_360(self.RAMC, obj.UMD)
         else:
-            r_asc = self.add_360(self.RAMC, object.UMD)
-        return self.set_object_eqt('||', r_asc, dec)
+            r_asc = self.add_360(self.RAMC, obj.UMD)
+        return self.set_object_eqt('||', r_asc, decl)
 
     def create_cont_parallel(self,
-                             object: Celestial_Object) -> Celestial_Object:
+                             obj: Celestial_Object) -> Celestial_Object:
         """
         Creates Celestal object which is in contra
         parallel with a given one in Placidua system
         """
-        dec = object.D
-        if object.quadrant in [4, 1]:
-            r_asc = self.RAMC + object.LMD
+        decl = obj.D
+        if obj.quadrant in [4, 1]:
+            r_asc = self.RAMC + obj.LMD
         else:
-            r_asc = self.RAMC - object.LMD
+            r_asc = self.RAMC - obj.LMD
 
-        return self.set_object_eqt('contr-||', r_asc, dec)
+        return self.set_object_eqt('contr-||', r_asc, decl)
 
     def conjunction_placidus(self,
                              obj1: Celestial_Object,
@@ -417,7 +422,7 @@ class Directions:
                        aspect: int) -> float:
         """
         Calculates the distance (degree) the promissor
-        should pass meets target real ascention degree 
+        should pass meets target real ascention degree
         (aspect point) in zodiac directions algorythm
         """
 
@@ -435,57 +440,32 @@ class Directions:
                      aspect: int) -> float:
         """
         Calculates the distance (degree) the promissor
-        should pass meets target real ascention degree 
+        should pass meets target real ascention degree
         (aspect point) in placudus algorythm
         """
+        # The point which will raise over horizon
+        # after significator's ascension in N hours.
+        # 8 hrs = Trine
+        aspect_point = self.set_object_eqt(
+            'Oblique Asc - aspect',
+            # OA, time to asc. minus aspect
+            significator.OA - aspect,
+            significator.D
+        )
 
-        if significator.quadrant == 1:
-            mund_pos_sign = 90 * (1 - significator.LMD / significator.NSA)
-        elif significator.quadrant == 2:
-            mund_pos_sign = 90 * (1 + significator.LMD / significator.NSA)
-        elif significator.quadrant == 3:
-            mund_pos_sign = 90 * (3 - significator.UMD / significator.DSA)
-        else:
-            mund_pos_sign = 90 * (3 + significator.UMD / significator.DSA)
+        # The point of promissor's raising over
+        # horizon. It should "conjunct" an
+        # aspect point in placidus semi-arc method
+        oblique_promissor = self.set_object_eqt(
+            'Oblique Ascention of Promissor',
+            promissor.OA,
+            promissor.D
+        )
 
-        if aspect < 0:
-            mund_pos_aspect = self.extract_360(mund_pos_sign, abs(aspect))
-        else:
-            mund_pos_aspect = self.add_360(mund_pos_sign, abs(aspect))
-
-        # Aspect point in 1st quadrant
-        if 0 <= mund_pos_aspect < 90:
-            ratio = 1 - mund_pos_aspect / 90
-            target_ra = self.RAIC - promissor.NSA * ratio
-
-        # Aspect point in 2nd quadrant
-        elif 90 <= mund_pos_aspect < 180:
-            ratio = mund_pos_aspect / 90 - 1
-            target_ra = self.RAIC + promissor.NSA * ratio
-
-        # Aspect point in 3rd quadrant
-        elif 180 <= mund_pos_aspect < 270:
-            ratio = 3 - mund_pos_aspect / 90
-            target_ra = self.RAMC - promissor.DSA * ratio
-
-        # Aspect point in 4th quadrant
-        else:
-            ratio = mund_pos_aspect / 90 - 3
-            target_ra = self.RAMC + promissor.DSA * ratio
-
-        # It can happen that conjunctions to 1st or 7th
-        # house may randomly be calculated by formulas
-        # for object 2, located above/beyond horizon. It
-        # happens due to computational uncertainty where
-        # horizon object with MD almost = SA located -
-        # beyond or above horizon. As a result the longest
-        # path of direction may be applied. We need to take
-        # it into account.
-        arc = promissor.RA - target_ra
-        if abs(arc > 180):
-            arc = arc - 360
-
-        return arc
+        return self.conjunction_placidus(
+            oblique_promissor,
+            aspect_point
+        )
 
     def aspect_field_plane(self,
                            promissor: Celestial_Object,
@@ -502,9 +482,11 @@ class Directions:
             print('Promissor should be a planet!')
             return
 
-        day = self.__time_to_travel(planet, self.planet[planet].lon + aspect)
+        day = self.__time_to_travel(
+            planet,
+            target_lon=self.planet[planet].lon + aspect
+        )
         lon, lat = swe.calc_ut(self.jday + day, 1)[0][:2]
-
         aspect_point = self.set_object('Aspect point', lon, lat)
 
         return self.conjunction_placidus(aspect_point, significator)
@@ -517,7 +499,14 @@ class Directions:
         for planet (0..9 - Sun..Pluto) to pass to
         a certain zodiac degree
         """
+        # A very approximate number of days needed for
+        # a planet in average to pass 30 degree distance.
         step = [30, 2.5, 30, 30, 80, 400, 1200, 3000, 6000, 7000][planet]
+
+        if target_lon < 0:
+            target_lon += 360
+        elif target_lon >= 360:
+            target_lon -= 360
 
         if target_lon < swe.calc_ut(self.jday, planet)[0][0]:
             step = -step
@@ -527,6 +516,7 @@ class Directions:
             while True:
                 lon = swe.calc_ut(self.jday + day, planet)[0][0]
                 next_lon = swe.calc_ut(self.jday + day + step, planet)[0][0]
+                # For dev tracking
                 # print('{:.2f} {:.2f} {:.2f}'.format(next_lon, target_lon, lon))
                 if abs(lon - next_lon) > 180:
                     break
@@ -541,6 +531,11 @@ class Directions:
 
     @staticmethod
     def get_years_ptolemey(arc: float) -> float:
+        """
+        According Prolemey each degree of the arc
+        corresponds to 1 year of life. Defined for
+        reference.
+        """
         return arc
 
     @staticmethod
@@ -572,7 +567,7 @@ class Directions:
         """
 
         r_asc = self.planet[0].RA + arc
-        lon = self.__lon_lat_from_ra_dec(r_asc, dec=0.0).horz_angle
+        lon = self.__lon_lat_from_ra_dec(r_asc, decl=0.0).horz_angle
         if lon < 0:
             lon += 360
 
@@ -589,8 +584,8 @@ class Directions:
             self.__inclination_ecliptic()
         )[0][0]
         curr_asc = self.house[0].lon
-
         target_lon = progressed_asc - curr_asc + self.planet[0].lon
+
         return self.__time_to_travel(planet=0, target_lon=target_lon)
 
     def get_years_vertical_arc(self, arc: float) -> float:
