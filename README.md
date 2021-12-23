@@ -1,7 +1,7 @@
 # Python packages for astronomers
 ## 1. Primary direction (ancient astronomy)
 
-A valuable class to calculate primary directions in Placidus house system. Requires swisseph library to be installed (`pip[env] install pyswisseph`)
+A valuable class to calculate primary directions in Placidus house system. Requires swisseph library to be installed (`pip [pipenv] install pyswisseph`)
 
 ### 1.1. Basic usage
 #### 1.1.1. Import and Declaration
@@ -30,7 +30,7 @@ You can now access astronomical data of any particular planet from the list:
 
 ```python
 dr.planet[1].AD  # Ascension difference of the Moon
-dr.planet[2].OA  # Oblique Ascension of Mercury
+dr.planet[2].RA  # Right Ascension of Mercury
 dr.planet[0].lat # Celestial latitude of the Sun
 ...
 ```
@@ -41,7 +41,8 @@ You can pick up any point on the sky with particular ecliptic coordinates and ac
 
 # Let's pick up the point which corresponds
 # to 0° of Leo zodiac sign
-leo = dr.get_equatorial_data(
+leo = dr.set_object(
+    '0° Leo',
     lon=120.0,  # 0 degree of Leo
     lat=0.0
 )
@@ -53,7 +54,7 @@ leo.MD # Meridian Distance of 0°Leo
 
 A complete list of properties is described in `directions_API_explained.py` file
 
-#### 1.1.3. Primary directions
+### 1.2. Primary directions
 
 You can also easily access methods to calculate primary directions:
 
@@ -83,7 +84,7 @@ aspect_field_plane(
 
 A complete list of extra options for primary direction methods is described in `directions_API_explained.py` file
 
-#### 1.1.3. Astrological Calculations
+#### 1.2.1. Astrological Calculations
 
 Finally, you may translate the arc of directions to the year of life (start point is the date, used to declare the object).
 
@@ -98,4 +99,13 @@ You may add this time delta to initial data to see the timing:
 dr.years_to_date(34.03)
 # gives sting output '1982, November'
 ```
+
+### 1.3. Other methods
+
+You can create pre-set objects, like this:
+```python
+parallel_for_mercury = dr.create_parallel(dr.planet[2])
+```
+
+
 Full list of methods to express arc in yesrs is described in `directions_API_explained.py` file

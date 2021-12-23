@@ -1,622 +1,543 @@
 """
-Домашний калькулятор первичных дирекций
+A useful class to calculate primary
+directions in Placidus house system.
+It requires the swisseph library to
+be installed: pip install pyswisseph
 """
-
-from math import tan, sin, cos, asin, atan, pi
 from collections import namedtuple
-from datetime import datetime
+from functools import singledispatch
+from math import tan, sin, cos, asin, atan, pi
+from os import spawnl
+from types import TracebackType
 import swisseph as swe
 
 
 class Directions:
     """
-    Создает объект промиссора и сигнификатора с атрибутами,
-    содержащими с эклиптические данные для расчета дирекций.
-    Включает методы расчета 1) мунданных, 2) зодиакальных и
-    3) орбитальных дирекций в системе домов Плацидуса.
+    Defines methods to express coordinates
+    of planets and Placidus house cusps in
+    different coordinate systems. Contains
+    methods to calculate primary direction
     """
 
-    # Астрономические данные для отдельных планет и куспидов домов
-    Coords = namedtuple('Coords', [
-        'lon',  # эклиптическая долгота
-        'lat',  # небесная широта (в эклиптической системе)
-        'max_ecl_speed',  # средняя эклиптическая скорость (для планет)
-        'RA',   # Прямое восхождение
-        'dec',  # Склонение
-        'AD',  # Разница восхождений до горизонта (на экваторе и на широте)
-        'OA',  # Косое восхождение = RA - AD
-        'OD',  # Косое захождение = RA + AD
-        'AD2',  # Разница восхождений до вертекса (на экваторe и на широте)
-        'OA2',  # Косое восхождение тип 2 = RA + AD2
-        'OD2',  # Косое захождение тип 2 = RA - AD2
-        'DSA',  # Дневная полудуга 90 + AD
-        'NSA',  # Ночная полудуга, 90 - AD
-        'UMD',  # Отклонение от MC, Upper MD, |RAMC - RA|
-        'LMD',  # Отклонение от IC, Lower MD, |RAIC - RA|
-        'MD',  # Отклонение (расстояние) от меридиана = min(UMD,LMD)
-        'quadrant',  # Квадрант 1 - ночний восток, 2 ночной запад и т.д.
-        'SA',  # Длина текущей (ночной или дневной) полудуги
-        'O_AD',  # Косое восхождение/зах. для восточн./западных планет
-        'O_AD2',  # Косое восхождение/зах. тип 2 для восточн./западных планет
-        # Для зодиакальных дирекций
-        'RA_zod',  # Прямое восхождение точки проекции планеты на эклиптику
-        'dec_zod',  # Зодиакальное склонение (точка проекции на эклиптику)
-        'AD_zod',  # Зодиакальное разница восхождений
-        'OA_zod',  # Зодиакальное косое восхождение = RA_zod - AD_zod
-        'OD_zod',  # Зодиакальное косое захождение = RA_zod + AD_zod
-        'AD2_zod',  # Разница вертексных восхождений точки проекции на эклиптику
-        'OA2_zod',  # Зодиакальное косое восхождение тип 2 = RA_zod + AD2_zod
-        'OD2_zod',  # Зодиакальное косое захождение тип 2 = RA_zod - AD2_zod
-    ])
-
-    # Астрономические данные - свойства небесной сферы
-    Sphere = namedtuple('Sphere', [
-        'RAMC',  # Прямое восхождение MC
-        'RAIC',  # Прямое восхождение IC
-        'OA_asc',  # Косое восхождение ASC
-        'OD_dsc',  # Косое захождение DSC
-    ])
-
     def __init__(self, data) -> None:
+        self.jday = swe.julday(data["year"],
+                               data["month"],
+                               data["day"],
+                               data["hour"] + data["min"]/60
+                               ) - data["tzone"] / 24
 
-        self.geo_lat = data["lat"]
-        self.jday = self.__get_jday(data)
+        self.__sin_e = sin(self.__inclination_ecliptic() / 180 * pi)
+        self.__cos_e = cos(self.__inclination_ecliptic() / 180 * pi)
+        self.__sin_phi = sin(data['lat'] / 180 * pi)
+        self.__cos_phi = cos(data['lat'] / 180 * pi)
+        self.__tan_phi = tan(data['lat'] / 180 * pi)
 
-        # Эклиптические координаты куспидов
-        _cusps = swe.houses(
+        cusps = swe.houses(
             self.jday,
-            self.geo_lat,
-            data["lon"],
+            data['lat'],
+            data['lon'],
             bytes("P", "ascii")
         )[0]
 
-        # Константы для дальнейших преобразований
-        self.earth_angle = self.__get_earth_angle()
-        _ramc = self.__get_ra(ecl_lon=_cusps[9], ecl_lat=0.0)
-        _raic = self.__get_ra(ecl_lon=_cusps[3], ecl_lat=0.0)
-        self.sphere = self.Sphere(
-            RAMC=_ramc,
-            RAIC=_raic,
-            OA_asc=self.__smart_add(_ramc, 90),
-            OD_dsc=self.__smart_subst(_ramc, 90)
-        )
+        self.RAMC = self.__ra_dec_from_lon_lat(
+            lon_ecl=cusps[9],
+            lat_ecl=0.0
+        ).horz_angle
 
-        # Задаем экваториальные данные для планет
+        self.RAIC = self.add_360(self.RAMC, 180)
+
         self.planet = []
-        for _p, _max_speed in enumerate([
-            1.0197905235424334,  # Sun
-            15.391811060863061,  # Moon
-            2.202957566153169,  # Merc
-            1.25890306853398,  # Venus
-            0.7913933948763741,  # Mars
-            0.24246019880425115,  # Jupiter
-            0.13266330060580733,  # Saturn
-            0.06470421363975136,
-            0.04225855279702155,
-            0.040509615350373694
-        ]):
-            _lon, _lat = swe.calc_ut(self.jday, _p)[0][:2]
-            self.planet.append(
-                self.get_equatorial_data(_lon, _lat, max_ecl_speed=_max_speed)
-            )
+        self.__planet_names = [
+            'SUN', 'MON', 'MER', 'VEN',
+            'MAR', 'JUP', 'SAT', 'URN',
+            'NEP', 'PLT', 'SNO',
+        ]
+        for planet_num, planet_name in enumerate(self.__planet_names):
+            lon, lat = swe.calc_ut(self.jday, planet_num)[0][:2]
+            lat = lat if planet_num else 0.0
+            self.planet.append(self.set_object(planet_name, lon, lat))
 
-        # Задаем экваториальные данные для домов
         self.house = []
-        for _cusp in _cusps:
-            self.house.append(
-                self.get_equatorial_data(_cusp, 0.0)
-            )
+        cusp_names = [f'H{house}' for house in range(1, 13)]
+        for cusp_num, cusp_degree in enumerate(cusps):
+            self.house.append(self.set_object(
+                cusp_names[cusp_num],
+                cusp_degree,
+                lat_ecl=0.0
+            ))
+
+        self.__geo_lon = data['lon']
+        self.__geo_lat = data['lat']
+
+    Point_Cartasian = namedtuple(
+        'Cartasian', ['x', 'y', 'z']
+    )
+
+    Point_Spherical = namedtuple(
+        'Spherical',
+        ['horz_angle', 'vert_angle']
+    )
+
+    Celestial_Object = namedtuple(
+        'Object',
+        [
+            'id',
+            'x_ecl', 'y_ecl', 'z_ecl',  # ecliptical xyz
+            'x_eqt', 'y_eqt', 'z_eqt',  # equatorial xyz
+            'RA', 'D',  # real ascension and declination
+            'lon', 'lat',  # ecliptical lon & lat
+            'AD', 'AD2',  # ascension diff. type 1 and 2
+            'UMD', 'LMD',  # Upper/Lower meridian dist.
+            'DSA', 'NSA',  # Day/Night semi-arc
+            'quadrant',  # 1,2 -under horison, 4,1 - west
+        ]
+    )
 
     @staticmethod
-    def __smart_add(deg_a, deg_b):
-        """
-        Складывает два градуса на круге 0..360
-        """
-        if deg_a + deg_b > 360:
-            return deg_a + deg_b - 360
-        return deg_a + deg_b
+    def add_360(deg1: float, deg2: float) -> float:
+        summ = deg1 + deg2
+        return summ if summ < 360 else 360 - summ
 
     @staticmethod
-    def __smart_subst(deg_a, deg_b):
-        """
-        Вычитает два градуса на круге 0..360
-        """
-        if deg_a - deg_b < 0:
-            return deg_a - deg_b + 360
-        return deg_a - deg_b
+    def extract_360(deg1: float, deg2: float) -> float:
+        diff = deg1 - deg2
+        return diff if diff > 0 else 360 + diff
 
     @staticmethod
-    def __get_jday(data: dict) -> float:
+    def shortest_distance(deg1, deg2):
         """
-        Возвращает юлианскую дату момента рождения
+        Returns the shortest arc between two angles
         """
-        return swe.julday(
-            data["year"], data["month"], data["day"],
-            data["hour"] + data["min"]/60
-        ) - data["tzone"] / 24
+        arc1 = max(deg1, deg2) - min(deg1, deg2)
+        arc2 = 360 - arc1
+        return min(arc1, arc2)
 
-    def __get_earth_angle(self) -> float:
+    def __inclination_ecliptic(self) -> float:
         """
-        Возвращает угол наклона земной оси в момент рождения
+        Returns the angle of ecliptic inclanation
+        in degrees
         """
-        _t = (self.jday - 2415020.0) / 36525
-        _delta = (46.845 * _t + 0.0059 * (_t ** 2) -
-                  0.001811 * (_t ** 3)) / 3600
-        return 23.452294 - _delta
-
-    def __get_ra(self,
-                 ecl_lon: float,
-                 ecl_lat: float) -> float:
-        """
-        Возвращает прямое восхождение по эклиптическим координатам
-        """
-        _ra = atan(
-            (
-                sin(ecl_lon/180*pi) * cos(self.earth_angle/180 * pi) -
-                tan(ecl_lat/180*pi) * sin(self.earth_angle/180*pi)
-            ) / cos(ecl_lon/180*pi)
-        ) / pi * 180
-
-        # Корректировка неопределенности функции arctan
-        if ecl_lon == 90:
-            _ra = 90
-        elif ecl_lon == 270:
-            _ra = 270
-        elif 90 < ecl_lon < 270:
-            _ra += 180
-        elif 270 < ecl_lon < 360:
-            _ra += 360
-
-        return _ra
-
-    def __get_decl(self,
-                   ecl_lon: float,
-                   ecl_lat: float) -> float:
-        """
-        Возвращает склонение по эклиптическим координатам
-        """
-        return asin(sin(ecl_lat/180*pi) * cos(self.earth_angle/180*pi) +
-                    cos(ecl_lat/180*pi) * sin(self.earth_angle/180*pi) *
-                    sin(ecl_lon/180*pi)) / pi * 180
-
-    def __get_ad(self, dec: float) -> float:
-        """
-        Возвращает разницу восхождений объекта на экваторе и
-        на текущей широте по заданному склонению объекта
-        """
-        return asin(tan(self.geo_lat/180*pi) * tan(dec/180*pi)) / pi * 180
-
-    def __get_ad2(self, dec: float) -> float:
-        """
-        Возвращает разницу вертексных восхождений на экваторе и
-        на текущей широте по заданному склонению объекта
-        """
-        _a = tan(dec/180*pi)  # max (tan 23.44)
-        _b = tan(self.geo_lat/180*pi)
-        _c = _a/_b
-
-        # Убираем отклонения в далеких знаках
-        # после запятой в вычислениях
-        if _c < -1:
-            _c = -1
-        elif _c > 1:
-            _c = 1
-        return asin(_c) / pi * 180
-
-    def __get_eclipt_lon(self,
-                         ra: float,
-                         dec: float) -> float:
-        """
-        Возвращает эклиптическую долготу по экваториальным координатам
-        """
-        _lon = atan(
-            (
-                sin(ra/180*pi) * cos(self.earth_angle/180 * pi) +
-                tan(dec/180*pi) * sin(self.earth_angle/180*pi)
-            ) / cos(ra/180*pi)
-        ) / pi * 180
-
-        # Корректировка неопределенности функции arctan
-        if ra == 90:
-            _lon = 90
-        elif ra == 270:
-            _lon = 270
-        elif 90 < ra < 270:
-            _lon += 180
-        elif 270 < ra < 360:
-            _lon += 360
-
-        if _lon < 0:
-            _lon += 360
-        elif _lon > 360:
-            _lon -= 360
-
-        return _lon
-
-    def __get_asc_or_vtx_from_ramc(self,
-                                   ramc: float,
-                                   vertex=False) -> float:
-        """
-        Возсращает эклиптическую долготу асцендента
-        или вертекса по прямому восхождению MC
-        """
-
-        if vertex:
-            _tan_phi = tan((90 - self.geo_lat)/180*pi)
-        else:
-            _tan_phi = tan(self.geo_lat/180*pi)
-        _cos_ramc = cos(ramc/180*pi)
-        _sin_ramc = sin(ramc/180*pi)
-        _sin_e = sin(self.earth_angle/180*pi)
-        _cos_e = cos(self.earth_angle/180*pi)
-        _tan_e = tan(self.earth_angle/180*pi)
-
-        _y = asin(_tan_phi * _tan_e)/pi*180
-        if abs(ramc - (180 + _y)) < 1e-10:
-            _asc_lon = 270
-        elif abs(ramc - (360 - _y)) < 1e-10:
-            _asc_lon = 90
-        else:
-            _x = atan(
-                -_cos_ramc / (_tan_phi * _sin_e + _sin_ramc * _cos_e)
-            ) / pi * 180
-
-            if ramc < 180 + _y:
-                _asc_lon = _x + 180
-            elif 180 + _y < ramc < 270:
-                _asc_lon = _x + 360
-            elif 270 <= ramc < 360 - _y:
-                _asc_lon = _x
-            else:
-                _asc_lon = _x + 180
-
-            return _asc_lon
-
-    def __get_vertex_lon(self, promissor: Coords) -> float:
-        """
-        Находит эклиптическую долготу вертекса/антивертекса
-        (что ближе к промиссору) по экваториальным координатам
-        промиссора
-        """
-
-        # Если соединяем с антивертексом
-        # (промиссор на вотоке)
-        if promissor.quadrant in [1, 4]:
-            _ra = self.sphere.RAMC + 90 - promissor.AD2
-        else:
-            _ra = self.sphere.RAMC - 90 - promissor.AD2
-        _dec = promissor.dec
-        return self.__get_eclipt_lon(_ra, _dec)
-
-    def get_equatorial_data(self,
-                            lon: float,
-                            lat: float,
-                            max_ecl_speed: float = 0) -> Coords:
-        """
-        Вычисляет экваториальные данные по заданным
-        эклиптическим координатам
-        """
-
-        # Данные для мунданных дирекций
-        _ra = self.__get_ra(lon, lat)  # Right Ascention (RA)
-        _dec = self.__get_decl(lon, lat)  # Declination (D)
-        _ad = self.__get_ad(_dec)  # Ascention Diff (AD)
-        _ad2 = self.__get_ad2(_dec)  # Ascention Diff Type 2 (AD2)
-
-        # Данные для зодиакальных дирекций
-        _ra_zod = self.__get_ra(lon, ecl_lat=0.0)  # RA of Zodiac degree
-        _dec_zod = self.__get_decl(lon, ecl_lat=0.0)  # D of Zodiac degree
-        _ad_zod = self.__get_ad(_dec_zod)  # AD of Zodiac degree
-        _ad2_zod = self.__get_ad2(_dec_zod)  # AD22 of Zodiac degree
-
-        # Формирование объекта Coords
-        _umd = abs(self.sphere.RAMC - _ra)  # Upper Median Distance
-        _lmd = abs(self.sphere.RAIC - _ra)  # Lower Median Distance
-        if _umd > 180:
-            _umd = 180 - _lmd
-        if _lmd > 180:
-            _lmd = 180 - _umd
-        _dsa = self.__smart_add(90, _ad)  # Day Semi-Arch (DSA)
-        _nsa = self.__smart_subst(90, _ad)  # Night Semi-Arch (NSA)
-        _oa = self.__smart_subst(_ra, _ad)  # Oblique Ascention (OA)
-        _od = self.__smart_add(_ra, _ad)  # Oblique Discention (OD)
-        _oa2 = self.__smart_add(_ra, _ad2)  # OA type 2
-        _od2 = self.__smart_subst(_ra, _ad2)  # OD type 2
-
-        if self.sphere.RAMC < _ra < self.sphere.RAIC:
-            _west = False
-            _east = True
-        else:
-            _west = True
-            _east = False
-
-        # Если 1 или 7 дома, относим их к подгоризонтным
-        if abs(_umd - _dsa) < 0.005 or abs(_lmd - _nsa) < 0.005:
-            _above = False
-            _below = True
-        elif _umd < _dsa or _lmd > _nsa:
-            _above = True
-            _below = False
-        else:
-            _above = False
-            _below = True
-
-        if _east and _below:
-            _quadrant = 1
-        elif _west and _below:
-            _quadrant = 2
-        elif _west and _above:
-            _quadrant = 3
-        else:
-            _quadrant = 4
-
-        return self.Coords(
-            lon=lon,
-            lat=lat,
-            max_ecl_speed=max_ecl_speed,
-            dec=_dec,
-            RA=_ra,
-            AD=_ad,
-            OA=_oa,
-            OD=_od,
-            AD2=_ad2,
-            OA2=_oa2,
-            OD2=_od2,
-            DSA=_dsa,
-            NSA=_nsa,
-            UMD=_umd,
-            LMD=_lmd,
-            MD=min(_umd, _lmd),
-            quadrant=_quadrant,
-            SA=_dsa if _above else _nsa,
-            O_AD=_oa if _east else _od,
-            O_AD2=_oa2 if _east else _od2,
-            RA_zod=_ra_zod,
-            dec_zod=_dec_zod,
-            AD_zod=_ad_zod,
-            OA_zod=self.__smart_subst(_ra_zod, _ad_zod),
-            OD_zod=self.__smart_add(_ra_zod, _ad_zod),
-            AD2_zod=_ad2_zod,
-            OA2_zod=self.__smart_add(_ra_zod, _ad2_zod),
-            OD2_zod=self.__smart_subst(_ra_zod, _ad2_zod),
+        julian_era = (self.jday - 2415020.0) / 36525
+        return (
+            23 + 27 / 60 + 8.26 / 3600 -
+            46.845 / 3600 * julian_era +
+            0.0059 / 3600 * julian_era ** 2 +
+            0.001811 / 3600 * julian_era ** 3
         )
 
-    def print_coordinates(self) -> None:
+    def __xyz_eqt_from_xyz_ecl(
+        self,
+        point: Point_Cartasian
+    ) -> Point_Cartasian:
         """
-        Выводит на экран таблицу экваториальных данных планет
+        Transfers XYZ from ecliptic to XYZ equator plane
+        x_eqt directed to the vernal equinox
+        y_eqt directed to the projection of 0° Cancer on eqt
+        z_eqt directed to the North Pole
         """
-        planets = ['SUN', 'MON', 'MER', 'VEN',
-                   'MAR', 'JUP', 'SAT', 'URN', 'NEP', 'PLT']
+        x_eqt = point.x
+        y_eqt = self.__cos_e * point.y - self.__sin_e * point.z
+        z_eqt = self.__sin_e * point.y + self.__cos_e * point.z
 
-        header = f"\n \t{'LONG':^6}\t{'LAT':^5}\t{'DEC':^7}\t{'RA':^6}\t{'MD':^6}"
-        print(f"{header}\n{'-'*45}")
+        return self.Point_Cartasian(x_eqt, y_eqt, z_eqt)
 
-        for _p, name in enumerate(planets):
-            row = f"{name}\t{self.planet[_p].lon:6.2f}\t{self.planet[_p].lat:5.2f}\t"
-            row += f"{self.planet[_p].dec:6.2f}\t{self.planet[_p].RA:6.2f}\t"
-            row += f"{self.planet[_p].MD:5.2f}"
-            print(row)
-
-        header = f"\n \t{'SA':^6}\t{'AD':^6}\t{'OA/OD':^6}\t{'AD2':^7}\t{'OA/OD2':^6}\n{'-'*46}"
-        print(header)
-
-        for _p, name in enumerate(planets):
-            row = f"{name}\t{self.planet[_p].SA:6.2f}\t"
-            row += f"{self.planet[_p].AD:6.2f}\t{self.planet[_p].O_AD:6.2f}\t"
-            row += f"{self.planet[_p].AD2:6.2f}\t{self.planet[_p].O_AD2:6.2f}"
-            print(row)
-        print('\n')
-
-    def aspect_mundi(self,
-                     promissor: Coords,
-                     significator: Coords,
-                     aspect: int = 0,
-                     option: int = 0,
-                     ) -> float:
+    def __xyz_ecl_from_xyz_eqt(
+        self,
+        point: Point_Cartasian
+    ) -> Point_Cartasian:
         """
-        Рассчитывает мунданное соединение/аспект (дирекцию) в
-        домах Плацида между двумя объектами с заданными эклип-
-        тическими параметрами. Параметр option принимает значения:
-        1 - рассчитывать соединение по параллели
-        2 - рассчитывать соединение по контрпараллели
-        3 - рассчитывать соединение с примарной вертикалью
-        По-умолчанию рассчитывает соединение между объектами,
-        но если задан параметр aspect (30, 60, 90...), то рассчи-
-        тывает мунданный аспект
+        Transfers XYZ from equator to XYZ ecliptic plane.
+        x_ecl directed to 0° Aries
+        y_ecl directed to 0° Cancer
+        z_ecl directed to northen eqt. hemisphere
         """
-        # Если ищем соединение с вертексом/контрвертексом
-        if option == 3:
-            if promissor.AD2 < 0:
-                _ratio = (90 + promissor.AD2)/90
-            else:
-                _ratio = (90 - promissor.AD2)/90
+        x_ect = point.x
+        y_ect = self.__cos_e * point.y + self.__sin_e * point.z
+        z_ect = - self.__sin_e * point.y + self.__cos_e * point.z
 
-            if promissor.quadrant in [4, 1]:
-                if promissor.dec > 0:
-                    _quadrant = 4
-                else:
-                    _quadrant = 1
-            else:
-                if promissor.dec > 0:
-                    _quadrant = 3
-                else:
-                    _quadrant = 2
+        return self.Point_Cartasian(x_ect, y_ect, z_ect)
 
-        # Если задан мунданный аспект (кроме соединения)
-        elif aspect:
-            _ratio = significator.MD / significator.SA
-            _quadrant = significator.quadrant
+    def __xyz_from_lat_lon(self,
+                           lon_ecl: float,
+                           lat_ecl: float) -> Point_Cartasian:
+        """
+        Transfers XYZ from a given plane to
+        celestial lon & lat of the same plane.
+        Ecliptical latitudes are positive for
+        northern hemisphere
+        """
+        cos_lat = cos(lat_ecl / 180 * pi)
+        sin_lat = sin(lat_ecl / 180 * pi)
+        cos_lon = cos(lon_ecl / 180 * pi)
+        sin_lon = sin(lon_ecl / 180 * pi)
 
-            # Определяем Placidus Mundane Position (PMP)
-            # сигнификатора
-            if _quadrant == 1:
-                _pmp = 90 * (1 - _ratio)
-            elif _quadrant == 2:
-                _pmp = 90 * (1 + _ratio)
-            elif _quadrant == 3:
-                _pmp = 90 * (3 - _ratio)
-            else:
-                _pmp = 90 * (3 + _ratio)
+        x_ecl = cos_lat * cos_lon
+        y_ecl = cos_lat * sin_lon
+        z_ecl = sin_lat
 
-            # Определяем Placidus Mundane Position (PMP)
-            # точки аспекта
-            _pmp = self.__smart_subst(_pmp, abs(aspect))
+        return self.Point_Cartasian(x_ecl, y_ecl, z_ecl)
 
-            # Уточняем пропорции точки аспекта к длине полудуги
-            # и положение точки аспекта в квадранте
-            if _pmp < 90:
-                _ratio = 1 - _pmp / 90
-                _quadrant = 1
-            elif 90 <= _pmp < 180:
-                _ratio = _pmp / 90 - 1
-                _quadrant = 2
-            elif 180 <= _pmp < 270:
-                _ratio = 3 - _pmp / 90
-                _quadrant = 3
-            else:
-                _ratio = _pmp / 90 - 3
-                _quadrant = 4
+    def __lon_lat_from_xyz(
+        self,
+        point: Point_Cartasian
+    ) -> Point_Spherical:
+        """
+        Transfers XYZ from a given plane to lon
+        and lat of the same plane (in degrees)
+        """
+        lon = atan(point.y / point.x) / pi * 180
+        if point.x < 0 and point.y > 0:
+            lon += 180
+        elif point.x < 0 and point.y < 0:
+            lon += 180
+        elif point.x > 0 and point.y < 0:
+            lon += 360
+        lat = asin(point.z) / pi * 180
 
-        # Ищем мунданные соединения
+        return self.Point_Spherical(horz_angle=lon,
+                                    vert_angle=lat)
+
+    def __ra_dec_from_lon_lat(self,
+                              lon_ecl: float,
+                              lat_ecl: float) -> Point_Spherical:
+        """
+        Transfers lon & lat from ecliptic plane to real
+        ascension & decl in equator plane (in degrees)
+        """
+        return self.__lon_lat_from_xyz(
+            self.__xyz_eqt_from_xyz_ecl(
+                self.__xyz_from_lat_lon(lon_ecl, lat_ecl)
+            )
+        )
+
+    def __lon_lat_from_ra_dec(self,
+                              r_asc: float,
+                              dec: float) -> Point_Spherical:
+        """
+        Transfers real ascension & dec from eqt, plane
+        lon & lat in ecliptic plane (in degrees)
+        """
+        return self.__lon_lat_from_xyz(
+            self.__xyz_ecl_from_xyz_eqt(
+                self.__xyz_from_lat_lon(r_asc, dec)
+            )
+        )
+
+    def __ad_from_dec(self, dec: float) -> float:
+        """
+        Returns ascension difference (in degrees)
+        of horizon raising of celestial body from
+        its declination. AD = on geo latitude 0
+        """
+        return asin(self.__tan_phi *
+                    tan(dec/180*pi)) / pi * 180
+
+    def __ad2_from_dec(self, dec: float) -> float:
+        """
+        Returns ascension difference (in degrees)
+        of celestial body crossing prime vertical
+        from the body's declination. AD2 = 0 on
+        geo latitude 0 (earth equator)
+        """
+        ratio = tan(dec/180*pi) / self.__tan_phi
+
+        # Mathematically abs(ratio) cannot exceed 1,
+        # but computationally it can by small value.
+        # We need to avoid such an unsertainty:
+        if ratio < -1:
+            ratio = -1
+        elif ratio > 1:
+            ratio = 1
+
+        return asin(ratio) / pi * 180
+
+    def set_object_eqt(self,
+                       name: str,
+                       r_asc: float,
+                       dec: float) -> Celestial_Object:
+        """
+        Create Celestial Object from
+        equatorial coordinates
+        """
+        lon_ecl, lat_ecl = self.__lon_lat_from_ra_dec(r_asc, dec)
+
+        return self.set_object(name, lon_ecl, lat_ecl)
+
+    def set_object(self,
+                   name: str,
+                   lon_ecl: float,
+                   lat_ecl: float) -> Celestial_Object:
+        """
+        Create Celestial Object from
+        ecliptical coordinates
+        """
+        xyz_ecl = self.__xyz_from_lat_lon(lon_ecl, lat_ecl)
+        xyz_eqt = self.__xyz_eqt_from_xyz_ecl(xyz_ecl)
+        r_asc, dec = self.__lon_lat_from_xyz(xyz_eqt)
+        asc_diff = self.__ad_from_dec(dec)
+
+        upper_md = self.shortest_distance(self.RAMC, r_asc)
+        lower_md = self.shortest_distance(self.RAIC, r_asc)
+        upper_md = upper_md if upper_md < 180 else 360 - upper_md
+        lower_md = lower_md if lower_md < 180 else 360 - upper_md
+
+        day_sa = 90 + asc_diff
+        night_sa = 90 - asc_diff
+
+        # Above ar below the horizon
+        if upper_md > day_sa or lower_md < night_sa:
+            above_horizon = False
         else:
-            _ratio = significator.MD/significator.SA
-            _quadrant = significator.quadrant
+            above_horizon = True
 
-            # Устраняем неопределенность дневных/ночных полудуг
-            # для объектов близких к горизонту
-            if (abs(significator.lon - self.house[0].lon) < 0.01 or
-                    abs(significator.lon - self.house[6].lon) < 0.01):
-                _ratio = 1
-
-        _t = 1 if _quadrant in [1, 3] else -1
-        if _quadrant in [1, 2]:
-            _v, _r, _contr_r = -1, self.sphere.RAIC, self.sphere.RAMC
+        # To the east or west
+        east_point_ra = self.add_360(self.RAMC, 90)
+        if self.shortest_distance(east_point_ra, r_asc) < 90:
+            to_the_east = True
         else:
-            _v, _r, _contr_r = 1, self.sphere.RAMC, self.sphere.RAIC
+            to_the_east = False
 
-        # Соединение с мунданной параллелью сигнификатора
-        if option == 1:
-            _t = -_t
+        if above_horizon:
+            quadrant = 4 if to_the_east else 3
+        elif not above_horizon:
+            quadrant = 1 if to_the_east else 2
 
-        # Соединение с мунданной контрпараллелью сигнификатора
-        if option == 2:
-            _t = -_t
-            _v = -_v
-            _r = _contr_r
+        return self.Celestial_Object(
+            id=name,
+            x_ecl=xyz_ecl.x,
+            y_ecl=xyz_ecl.y,
+            z_ecl=xyz_ecl.z,
+            x_eqt=xyz_ecl.x,
+            y_eqt=xyz_eqt.y,
+            z_eqt=xyz_eqt.z,
+            RA=r_asc,
+            D=dec,
+            lon=lon_ecl,
+            lat=lat_ecl,
+            AD=asc_diff,
+            AD2=self.__ad2_from_dec(dec),
+            UMD=upper_md,
+            LMD=lower_md,
+            DSA=day_sa,
+            NSA=night_sa,
+            quadrant=quadrant,
+        )
 
-        # print("{} - {} + ({}) * (90 + ({})*{}) * {}".format(
-        #     promissor.RA, _r, _t, _v, promissor.AD, _ratio
-        # ))
-        return promissor.RA - _r + _t * (90 + _v * promissor.AD) * _ratio
+    def create_vertex(self,
+                      object: Celestial_Object) -> Celestial_Object:
+        """
+        Creates Celestal object for vertex point
+        (cross of day circle of a given celestial
+        object with western part of prime meridian)
+        """
+
+        dec = object.D
+        r_asc = self.RAMC - 90 + object.AD2
+        return self.set_object_eqt('VTX', r_asc, dec)
+
+    def create_antivertex(self,
+                          object: Celestial_Object) -> Celestial_Object:
+        """
+        Creates Celestal object for a-vertex point
+        (cross of day circle of a given celestial
+        object with eastern part of prime meridian)
+        """
+
+        dec = object.D
+        r_asc = self.RAMC + 90 - object.AD2
+        return self.set_object_eqt('VTX', r_asc, dec)
+
+    def create_parallel(self,
+                        object: Celestial_Object) -> Celestial_Object:
+        """
+        Creates Celestal object which is in parallel
+        with a given one in Placidua system
+        """
+        dec = object.D
+        if abs(object.RA - (object.UMD + self.RAMC)) < 1e-10:
+            r_asc = self.extract_360(self.RAMC, object.UMD)
+        else:
+            r_asc = self.add_360(self.RAMC, object.UMD)
+        return self.set_object_eqt('||', r_asc, dec)
+
+    def create_cont_parallel(self,
+                             object: Celestial_Object) -> Celestial_Object:
+        """
+        Creates Celestal object which is in contra
+        parallel with a given one in Placidua system
+        """
+        dec = object.D
+        if object.quadrant in [4, 1]:
+            r_asc = self.RAMC + object.LMD
+        else:
+            r_asc = self.RAMC - object.LMD
+
+        return self.set_object_eqt('contr-||', r_asc, dec)
+
+    def conjunction_placidus(self,
+                             obj1: Celestial_Object,
+                             obj2: Celestial_Object) -> float:
+        """
+        Calculates the distance that celestial
+        object 1 needs to pass to target right
+        ascention where it 'conjuncts' the 2nd
+        objects according Placidus
+        """
+        if obj2.quadrant == 4:
+            ratio = obj2.UMD / obj2.DSA
+            target_ra = self.RAMC + obj1.DSA * ratio
+        elif obj2.quadrant == 1:
+            ratio = obj2.LMD / obj2.NSA
+            target_ra = self.RAIC - obj1.NSA * ratio
+        elif obj2.quadrant == 2:
+            ratio = obj2.LMD / obj2.NSA
+            target_ra = self.RAIC + obj1.NSA * ratio
+        else:
+            ratio = obj2.UMD / obj2.DSA
+            target_ra = self.RAMC - obj1.DSA * ratio
+
+        # It can happen that conjunctions to 1st or 7th
+        # house may randomly be calculated by formulas
+        # for object 2, located above/beyond horizon. It
+        # happens due to computational uncertainty where
+        # horizon object with MD almost = SA located -
+        # beyond or above horizon. As a result the longest
+        # path of direction may be applied. We need to take
+        # it into account.
+        arc = obj1.RA - target_ra
+        if abs(arc > 180):
+            arc = arc - 360
+
+        return arc
 
     def aspect_zodiaco(self,
-                       promissor: Coords,
-                       significator: Coords,
-                       aspect: int = 0,
-                       option: int = 0) -> float:
+                       promissor: Celestial_Object,
+                       significator: Celestial_Object,
+                       aspect: int) -> float:
         """
-        Возвращает зодиакальный аспект (по заданным
-        градусам - 30, 60, 90 и т.д.). Options
-        принимает те же значения, что и в методе
-        aspect_mundi()
+        Calculates the distance (degree) the promissor
+        should pass meets target real ascention degree 
+        (aspect point) in zodiac directions algorythm
         """
-        if option == 3:
-            _new_lon = self.__get_vertex_lon(promissor)
+
+        aspect_point = self.set_object(
+            'Aspect point',
+            lon_ecl=promissor.lon + aspect,
+            lat_ecl=0.0
+        )
+
+        return self.conjunction_placidus(aspect_point, significator)
+
+    def aspect_mundi(self,
+                     promissor: Celestial_Object,
+                     significator: Celestial_Object,
+                     aspect: int) -> float:
+        """
+        Calculates the distance (degree) the promissor
+        should pass meets target real ascention degree 
+        (aspect point) in placudus algorythm
+        """
+
+        if significator.quadrant == 1:
+            mund_pos_sign = 90 * (1 - significator.LMD / significator.NSA)
+        elif significator.quadrant == 2:
+            mund_pos_sign = 90 * (1 + significator.LMD / significator.NSA)
+        elif significator.quadrant == 3:
+            mund_pos_sign = 90 * (3 - significator.UMD / significator.DSA)
         else:
-            _new_lon = self.__smart_add(promissor.lon, abs(aspect))
-        _new_promissor = self.get_equatorial_data(lon=_new_lon, lat=0.0)
-        return self.aspect_mundi(_new_promissor,
-                                 significator,
-                                 option=option)
+            mund_pos_sign = 90 * (3 + significator.UMD / significator.DSA)
+
+        if aspect < 0:
+            mund_pos_aspect = self.extract_360(mund_pos_sign, abs(aspect))
+        else:
+            mund_pos_aspect = self.add_360(mund_pos_sign, abs(aspect))
+
+        # Aspect point in 1st quadrant
+        if 0 <= mund_pos_aspect < 90:
+            ratio = 1 - mund_pos_aspect / 90
+            target_ra = self.RAIC - promissor.NSA * ratio
+
+        # Aspect point in 2nd quadrant
+        elif 90 <= mund_pos_aspect < 180:
+            ratio = mund_pos_aspect / 90 - 1
+            target_ra = self.RAIC + promissor.NSA * ratio
+
+        # Aspect point in 3rd quadrant
+        elif 180 <= mund_pos_aspect < 270:
+            ratio = 3 - mund_pos_aspect / 90
+            target_ra = self.RAMC - promissor.DSA * ratio
+
+        # Aspect point in 4th quadrant
+        else:
+            ratio = mund_pos_aspect / 90 - 3
+            target_ra = self.RAMC + promissor.DSA * ratio
+
+        # It can happen that conjunctions to 1st or 7th
+        # house may randomly be calculated by formulas
+        # for object 2, located above/beyond horizon. It
+        # happens due to computational uncertainty where
+        # horizon object with MD almost = SA located -
+        # beyond or above horizon. As a result the longest
+        # path of direction may be applied. We need to take
+        # it into account.
+        arc = promissor.RA - target_ra
+        if abs(arc > 180):
+            arc = arc - 360
+
+        return arc
 
     def aspect_field_plane(self,
-                           promissor: Coords,
-                           significator: Coords,
-                           planetary_orbit: int,
-                           aspect: int = 0,
-                           option: int = 0):
+                           promissor: Celestial_Object,
+                           significator: Celestial_Object,
+                           aspect: int) -> float:
         """
-        Возвращает орбитальный аспект (по заданным
-        градусам - 30, 60, +90 и т.д.) по орбите
-        заданной планеты (0..9 - Солнце-Плутон).
-        Options принимает те же значения, что и в
-        методе aspect_mundi()
+        Calculates the distance (degree) the promissor
+        should pass meets target real ascention degree
+        (aspect point) in fileld plane algorythm
         """
+        try:
+            planet = self.__planet_names.index(promissor.id)
+        except ValueError:
+            print('Promissor should be a planet!')
+            return
 
-        if option == 3:
-            _target_lon = self.__get_vertex_lon(promissor)
-            # return _target_lon
-        else:
-            _target_lon = self.__smart_add(promissor.lon, abs(aspect))
+        day = self.__time_to_travel(planet, self.planet[planet].lon + aspect)
+        lon, lat = swe.calc_ut(self.jday + day, 1)[0][:2]
 
-        # Находим момент времени, когда промиссор
-        # окажется в новом положении
-        if promissor.max_ecl_speed:
-            _step = 1 / promissor.max_ecl_speed
-        else:
-            _step = 1
+        aspect_point = self.set_object('Aspect point', lon, lat)
 
-        _delta = self.__travel_time_to_ecl_lat(planetary_orbit,
-                                               _target_lon,
-                                               _step)
+        return self.conjunction_placidus(aspect_point, significator)
 
-        _target_lat = swe.calc_ut(self.jday + _delta, planetary_orbit)[0][1]
-        _new_promissor = self.get_equatorial_data(
-            lon=_target_lon, lat=_target_lat
-        )
-
-        return self.aspect_mundi(
-            promissor=_new_promissor,
-            significator=significator,
-            option=option
-        )
-
-    def __travel_time_to_ecl_lat(self,
-                                 planet: int,
-                                 target_lon: float,
-                                 step: float) -> float:
+    def __time_to_travel(self,
+                         planet: int,
+                         target_lon: float) -> float:
         """
-        Вычисляет кол-во юлианских дней, за которые планета
-        дойдет до заданной точки эклиптики. Начальный поиск
-        происходит с шагом _step (кол-во дней, за который
-        планета движется примерно на 1 градус эклиптической
-        дуги.
+        Returns a number of julian days nesessary
+        for planet (0..9 - Sun..Pluto) to pass to
+        a certain zodiac degree
         """
-        _day = 0
+        step = [30, 2.5, 30, 30, 80, 400, 1200, 3000, 6000, 7000][planet]
+
+        if target_lon < swe.calc_ut(self.jday, planet)[0][0]:
+            step = -step
+
+        day = 0
         while True:
-            _lon1 = swe.calc_ut(self.jday + _day, planet)[0][0]
-            _lon2 = swe.calc_ut(self.jday + _day + step,
-                                planet)[0][0]
-            if _lon1 < target_lon < _lon2 and abs(_lon2 - _lon1) < 30:
+            while True:
+                lon = swe.calc_ut(self.jday + day, planet)[0][0]
+                next_lon = swe.calc_ut(self.jday + day + step, planet)[0][0]
+                # print('{:.2f} {:.2f} {:.2f}'.format(next_lon, target_lon, lon))
+                if abs(lon - next_lon) > 180:
+                    break
+                if (target_lon - lon) * (next_lon - target_lon) > 0:
+                    break
+                day += step
+            step /= 2
+            if abs(target_lon - lon) < 1e-3:
                 break
-            _day += step
 
-        # Метод дихотомии
-        _a = _day
-        _b = _day + step
-        while True:
-            _c = _a + (_b - _a)/2
-            _lon_a = swe.calc_ut(
-                self.jday + _a, planet)[0][0] - target_lon
-            _lon_c = swe.calc_ut(
-                self.jday + _c, planet)[0][0] - target_lon
-            if _lon_a * _lon_c > 0:
-                _a = _c
-            else:
-                _b = _c
-
-            if abs(_lon_c) < 0.1:
-                break
-        return _c
-
-    def years_to_date(self, years: float) -> str:
-        """
-        Переводит год жизни в дату с момента рождения
-        """
-        date = swe.jdut1_to_utc(self.jday + years * 365.24, 1)
-        return datetime(
-            date[0], date[1], date[2], date[3], date[4], int(date[5])
-        ).strftime("%Y, %B")
+        return day
 
     @staticmethod
     def get_years_ptolemey(arc: float) -> float:
@@ -625,81 +546,70 @@ class Directions:
     @staticmethod
     def get_years_naibod(arc: float) -> float:
         """
-        Переводит дугу в годы жизни по методу Найбода
+        Transfers the arc of direction into the year
+        according to Naibod method
         """
         return arc * 1.0146
 
     def get_years_simmonite(self, arc: float) -> float:
         """
-        Переводит дугу в годы жизни по методу Симмонита
+        Transfers the arc of direction into the year
+        according to Simmonite method
         """
-        _next_day_sun = self.get_equatorial_data(
-            lon=(swe.calc_ut(self.jday + 1, 0)[0][0]),
-            lat=0.0
-        )
+        next_day_sun_ra = self.__ra_dec_from_lon_lat(
+            lon_ecl=(swe.calc_ut(self.jday + 1, 0)[0][0]),
+            lat_ecl=0.0
+        ).horz_angle
 
-        _correction = abs(self.planet[0].RA - _next_day_sun.RA)
+        correction = abs(self.planet[0].RA - next_day_sun_ra)
 
-        return arc / _correction
+        return arc / correction
 
     def get_years_placidus(self, arc: float) -> float:
         """
-        Переводит дугу в годы жизни по методу Плацида
+        Transfers the arc of direction into the year
+        according to to True Solar Arc algorithm
         """
 
-        _ra = self.planet[0].RA + arc
-        _lon = self.__get_eclipt_lon(_ra, dec=0.0)
-        if _lon < 0:
-            _lon += 360
-        _time_to_travel = self.__travel_time_to_ecl_lat(planet=0,
-                                                        target_lon=_lon,
-                                                        step=1)
-        return _time_to_travel
+        r_asc = self.planet[0].RA + arc
+        lon = self.__lon_lat_from_ra_dec(r_asc, dec=0.0).horz_angle
+        if lon < 0:
+            lon += 360
+
+        return self.__time_to_travel(planet=0, target_lon=lon)
 
     def get_years_ascendant_arc(self, arc: float) -> float:
         """
-        Переводит дугу в годы жизни по методу восходящей дуги
+        Transfers the arc of direction into the year
+        according to ascendant arc algorithm
         """
-        _progressed_ramc = self.sphere.RAMC + arc
-        _progressed_asc = self.__get_asc_or_vtx_from_ramc(_progressed_ramc)
-        _target_lon = _progressed_asc - self.house[0].lon + self.planet[0].lon
-        if _target_lon > 360:
-            _target_lon -= 360
-        elif _target_lon < 0:
-            _target_lon += 360
+        progressed_asc = swe.houses_armc(
+            self.RAMC + arc,
+            self.__geo_lat,
+            self.__inclination_ecliptic()
+        )[0][0]
+        curr_asc = self.house[0].lon
 
-        _time_to_travel = self.__travel_time_to_ecl_lat(
-            planet=0,
-            target_lon=_target_lon,
-            step=1
-        )
-
-        return _time_to_travel
+        target_lon = progressed_asc - curr_asc + self.planet[0].lon
+        return self.__time_to_travel(planet=0, target_lon=target_lon)
 
     def get_years_vertical_arc(self, arc: float) -> float:
         """
-        Переводит дугу в годы жизни по методу вертикальной дуги
+        Transfers the arc of direction into the year
+        according to vertical arc measure
         """
-        _progressed_ramc = self.sphere.RAIC + arc
-        _progressed_vtx = self.__get_asc_or_vtx_from_ramc(
-            _progressed_ramc,
-            vertex=True
-        )
-        _natal_vtx = self.__get_asc_or_vtx_from_ramc(
-            self.sphere.RAIC,
-            vertex=True
-        )
 
-        _target_lon = _progressed_vtx - _natal_vtx + self.planet[0].lon
-        if _target_lon > 360:
-            _target_lon -= 360
-        elif _target_lon < 0:
-            _target_lon += 360
+        progressed_v = swe.houses_armc(
+            self.RAIC + arc,
+            90 - self.__geo_lat,
+            self.__inclination_ecliptic()
+        )[0][0]
 
-        _time_to_travel = self.__travel_time_to_ecl_lat(
-            planet=0,
-            target_lon=_target_lon,
-            step=1
-        )
+        current_v = swe.houses_armc(
+            self.RAIC,
+            90 - self.__geo_lat,
+            self.__inclination_ecliptic()
+        )[0][0]
 
-        return _time_to_travel
+        target_lon = progressed_v - current_v + self.planet[0].lon
+        return self.__time_to_travel(planet=0, target_lon=target_lon)
