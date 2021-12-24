@@ -6,6 +6,7 @@ be installed: pip install pyswisseph
 """
 from collections import namedtuple
 from math import tan, sin, cos, asin, atan, pi
+from datetime import datetime
 import swisseph as swe
 
 
@@ -43,7 +44,7 @@ class Directions:
         ).horz_angle
 
         # Real ascension IC
-        self.RAIC = self.add_360(self.RAMC, 180)
+        self.RAIC = self.normalize_360(self.RAMC + 180)
 
         self.planet = []
         self.__planet_names = [
@@ -94,20 +95,15 @@ class Directions:
     )
 
     @staticmethod
-    def add_360(deg1: float, deg2: float) -> float:
+    def normalize_360(degree: float) -> float:
         """
-        Adds two degrees in 360 degree circle
+        Normalizes degree to 360 scale
         """
-        summ = deg1 + deg2
-        return summ if summ < 360 else 360 - summ
-
-    @staticmethod
-    def substract_360(deg1: float, deg2: float) -> float:
-        """
-        subtracts 2 numbers two degrees in 360 degree circle
-        """
-        diff = deg1 - deg2
-        return diff if diff > 0 else 360 + diff
+        if degree < 0:
+            return degree + 360
+        if degree > 360:
+            return degree - 360
+        return degree
 
     @staticmethod
     def shortest_distance(deg1, deg2):
@@ -297,7 +293,7 @@ class Directions:
             above_horizon = True
 
         # To the east or west
-        east_point_ra = self.add_360(self.RAMC, 90)
+        east_point_ra = self.normalize_360(self.RAMC + 90)
         if self.shortest_distance(east_point_ra, r_asc) < 90:
             to_the_east = True
         else:
@@ -361,9 +357,9 @@ class Directions:
         """
         decl = obj.D
         if abs(obj.RA - (obj.UMD + self.RAMC)) < 1e-10:
-            r_asc = self.substract_360(self.RAMC, obj.UMD)
+            r_asc = self.normalize_360(self.RAMC - obj.UMD)
         else:
-            r_asc = self.add_360(self.RAMC, obj.UMD)
+            r_asc = self.normalize_360(self.RAMC + obj.UMD)
         return self.set_object_eqt('||', r_asc, decl)
 
     def create_cont_parallel(self,
@@ -482,10 +478,13 @@ class Directions:
             print('Promissor should be a planet!')
             return
 
-        day = self.__time_to_travel(
-            planet,
-            target_lon=self.planet[planet].lon + aspect
-        )
+        if aspect == 0:
+            day = 0
+        else:
+            day = self.__time_to_travel(
+                planet,
+                target_lon=self.normalize_360(self.planet[planet].lon + aspect)
+            )
         lon, lat = swe.calc_ut(self.jday + day, 1)[0][:2]
         aspect_point = self.set_object('Aspect point', lon, lat)
 
@@ -497,18 +496,16 @@ class Directions:
         """
         Returns a number of julian days nesessary
         for planet (0..9 - Sun..Pluto) to pass to
-        a certain zodiac degree
+        a certain zodiac degree. May return negative
+        days in case the target longitude is less
+        than starting point
         """
         # A very approximate number of days needed for
         # a planet in average to pass 30 degree distance.
         step = [30, 2.5, 30, 30, 80, 400, 1200, 3000, 6000, 7000][planet]
+        _target_lon = self.normalize_360(target_lon)
 
-        if target_lon < 0:
-            target_lon += 360
-        elif target_lon >= 360:
-            target_lon -= 360
-
-        if target_lon < swe.calc_ut(self.jday, planet)[0][0]:
+        if _target_lon < swe.calc_ut(self.jday, planet)[0][0]:
             step = -step
 
         day = 0
@@ -520,14 +517,42 @@ class Directions:
                 # print('{:.2f} {:.2f} {:.2f}'.format(next_lon, target_lon, lon))
                 if abs(lon - next_lon) > 180:
                     break
-                if (target_lon - lon) * (next_lon - target_lon) > 0:
+                if (_target_lon - lon) * (next_lon - _target_lon) > 0:
                     break
                 day += step
             step /= 2
-            if abs(target_lon - lon) < 1e-3:
+            if abs(_target_lon - lon) < 1e-3:
                 break
 
         return day
+
+    def __time_to_travel_sun(self, target_lon: float) -> float:
+        """
+        Returns the number of days the Sun needs to 
+        reach a certain longitute on ecliptic plane
+        Always returns positive number
+        """
+        sun_lon = self.planet[0].lon
+
+        # Shortest time may be negative
+        # if shortest direction from the Sun
+        # to target degree is a backword dir-n
+        shortest_time = self.__time_to_travel(
+            planet=0,
+            target_lon=target_lon)
+
+        # If normal direction
+        if target_lon > self.planet[0].lon:
+            return shortest_time
+
+        # Retro movement
+        time_to_360 = self.__time_to_travel(
+            planet=0, target_lon=359.99)
+        time_0_target = self.__time_to_travel(
+            planet=0,
+            target_lon=sun_lon + target_lon)
+
+        return time_to_360 + time_0_target
 
     @staticmethod
     def get_years_ptolemey(arc: float) -> float:
@@ -568,8 +593,7 @@ class Directions:
 
         r_asc = self.planet[0].RA + arc
         lon = self.__lon_lat_from_ra_dec(r_asc, decl=0.0).horz_angle
-        if lon < 0:
-            lon += 360
+        lon = self.normalize_360(lon)
 
         return self.__time_to_travel(planet=0, target_lon=lon)
 
@@ -579,14 +603,17 @@ class Directions:
         according to ascendant arc algorithm
         """
         progressed_asc = swe.houses_armc(
-            self.RAMC + arc,
+            self.normalize_360(self.RAMC + arc),
             self.__geo_lat,
             self.__inclination_ecliptic()
         )[0][0]
         curr_asc = self.house[0].lon
-        target_lon = progressed_asc - curr_asc + self.planet[0].lon
 
-        return self.__time_to_travel(planet=0, target_lon=target_lon)
+        sun_lon = self.planet[0].lon
+        target_lon = progressed_asc - curr_asc + sun_lon
+        target_lon = self.normalize_360(target_lon)
+
+        return self.__time_to_travel_sun(target_lon)
 
     def get_years_vertical_arc(self, arc: float) -> float:
         """
@@ -595,7 +622,7 @@ class Directions:
         """
 
         progressed_v = swe.houses_armc(
-            self.RAIC + arc,
+            self.normalize_360(self.RAIC + arc),
             90 - self.__geo_lat,
             self.__inclination_ecliptic()
         )[0][0]
@@ -606,5 +633,19 @@ class Directions:
             self.__inclination_ecliptic()
         )[0][0]
 
-        target_lon = progressed_v - current_v + self.planet[0].lon
-        return self.__time_to_travel(planet=0, target_lon=target_lon)
+        sun_lon = self.planet[0].lon
+        target_lon = progressed_v - current_v + sun_lon
+
+        return self.__time_to_travel_sun(target_lon)
+
+    def show_date(self, age: float) -> str:
+        """
+        Transfers the number of years derived 
+        from into directions into a future date
+        and prints result into a string
+        """
+        date = swe.jdut1_to_utc(self.jday + age * 365.24, 1)
+
+        return datetime(
+            date[0], date[1], date[2], date[3], date[4], int(date[5])
+        ).strftime("%Y %B, %d")
