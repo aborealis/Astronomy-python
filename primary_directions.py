@@ -449,19 +449,42 @@ class Directions:
             significator.D
         )
 
-        # The point of promissor's raising over
-        # horizon. It should "conjunct" an
-        # aspect point in placidus semi-arc method
-        oblique_promissor = self.set_object_eqt(
-            'Oblique Ascention of Promissor',
-            promissor.OA,
-            promissor.D
-        )
-
+        # Significator conjuncts this point when
+        # it raise over horizon to the same ratio
+        # of his day/night semi-arc, as the aspect
+        # point does in its semi-arc
         return self.conjunction_placidus(
-            oblique_promissor,
+            promissor,
             aspect_point
         )
+
+    def aspect_mundi2(self,
+                      promissor: Celestial_Object,
+                      significator: Celestial_Object,
+                      aspect: int) -> float:
+        """
+        Calculates the distance (degree) the promissor
+        should pass meets target real ascention degree
+        (aspect point) in oblique ascention algorithm
+        """
+        # The point which will raise over horizon
+        # after significator's ascension in N hours.
+        # 8 hrs = Trine
+        aspect_point = self.set_object_eqt(
+            'Oblique Asc - aspect',
+            # OA, time to asc. minus aspect
+            significator.OA - aspect,
+            significator.D
+        )
+
+        # The promissor will be in exact
+        # mundane aspect with significator
+        # when (significator's OA - promissot's
+        # OA) = aspect, i.e. aspect point's RA
+        # equalt ro promissor's OA. The distance
+        # to that point is the mundane direction
+
+        return promissor.OA - aspect_point.RA
 
     def aspect_field_plane(self,
                            promissor: Celestial_Object,
