@@ -618,7 +618,7 @@ class Directions:
         lon = self.__lon_lat_from_ra_dec(r_asc, decl=0.0).horz_angle
         lon = self.normalize_360(lon)
 
-        return self.__time_to_travel(planet=0, target_lon=lon)
+        return self.__time_to_travel_sun(target_lon=lon)
 
     def get_years_ascendant_arc(self, arc: float) -> float:
         """
