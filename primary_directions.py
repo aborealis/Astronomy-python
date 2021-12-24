@@ -439,7 +439,10 @@ class Directions:
         """
         # If object never raises or descends this
         # method is not applicable
-        if not isinstance(obj2.AD, float):
+        if (
+            not isinstance(obj1.AD, float) or
+            not isinstance(obj2.AD, float)
+        ):
             return None
 
         if obj2.quadrant == 4:
@@ -531,7 +534,10 @@ class Directions:
         """
         # If significator never raises ot descends
         # this method is not applicable
-        if not isinstance(significator.AD, float):
+        if (
+            not isinstance(promissor.AD, float) or
+            not isinstance(significator.AD, float)
+        ):
             return None
 
         # The point which will raise over horizon
@@ -565,7 +571,7 @@ class Directions:
         try:
             planet = self.__planet_names.index(promissor.id)
         except ValueError:
-            print('Promissor should be a planet!')
+            print('Promissor should be a planet in Field Plane direction!')
             return
 
         if aspect == 0:
