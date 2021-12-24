@@ -432,10 +432,9 @@ class Directions:
                              obj1: Celestial_Object,
                              obj2: Celestial_Object) -> float:
         """
-        Calculates the distance that celestial
-        object 1 needs to pass to target right
-        ascention where it 'conjuncts' the 2nd
-        objects according Placidus
+        Calculates the distance in degrees that
+        the 1st object needs to pass to conjunct
+        the 2nd object according Placidus method
         """
         # If object never raises or descends this
         # method is not applicable
@@ -477,9 +476,9 @@ class Directions:
                        significator: Celestial_Object,
                        aspect: int) -> float:
         """
-        Calculates the distance (degree) the promissor
-        should pass meets target real ascention degree
-        (aspect point) in zodiac directions algorythm
+        Calculates the distance in degrees the promissor's
+        aspect point should pass to meets the significator
+        in zodiac direction algorythm
         """
 
         aspect_point = self.set_object(
@@ -495,29 +494,43 @@ class Directions:
                      significator: Celestial_Object,
                      aspect: int) -> float:
         """
-        Calculates the distance (degree) the promissor
-        should pass meets target real ascention degree
-        (aspect point) in placudus algorythm
+        Calculates the distance in degrees the promissor
+        should pass to meet the significator's aspect
+        point in proportional semi-arcs algorythm
         """
         # if object never raises or descends
         # this method is not applicable
         if not isinstance(significator.AD, float):
             return None
 
-        # The point which will raise over horizon
-        # after significator's ascension in N hours.
-        # 8 hrs = Trine
+        ratio = (significator.UMD / significator.DSA
+                 if significator.quadrant in [4, 3] else
+                 significator.LMD / significator.NSA)
+
+        # The arc of celestial eqiator from East Point
+        # to the quadrant where significator is. The
+        # end point of the arc has the same % of
+        # deviation from horizon/meridian as the
+        # significator on its semi-arc
+        if significator.quadrant == 1:
+            arc = 90 - ratio * 90
+        elif significator.quadrant == 2:
+            arc = 90 + ratio * 90
+        elif significator.quadrant == 3:
+            arc = 270 - ratio * 90
+        else:
+            arc = 270 + ratio * 90
+
         aspect_point = self.set_object_eqt(
-            'Oblique Asc - aspect',
-            # OA, time to asc. minus aspect
-            significator.OA - aspect,
+            'Aspect point',
+            self.normalize_360(self.RAMC + 90 + arc - aspect),
             significator.D
         )
 
         # Significator conjuncts this point when
-        # it raise over horizon to the same ratio
+        # it deviates from horizon to the same ratio
         # of his day/night semi-arc, as the aspect
-        # point does in its semi-arc
+        # point does on the equator
         return self.conjunction_placidus(
             promissor,
             aspect_point
@@ -528,9 +541,9 @@ class Directions:
                       significator: Celestial_Object,
                       aspect: int) -> float:
         """
-        Calculates the distance (degree) the promissor
-        should pass meets target real ascention degree
-        (aspect point) in oblique ascention algorithm
+        Calculates the distance in degrees the promissor's
+        oblique ascention pass to meet the significator's
+        oblique ascention (Alexandrian algorithm)
         """
         # If significator never raises ot descends
         # this method is not applicable
@@ -564,9 +577,9 @@ class Directions:
                            significator: Celestial_Object,
                            aspect: int) -> float:
         """
-        Calculates the distance (degree) the promissor
-        should pass meets target real ascention degree
-        (aspect point) in fileld plane algorythm
+        Calculates the distance in degrees the promissor's
+        aspect point should pass to meet the significator
+        in fileld plane algorythm
         """
         try:
             planet = self.__planet_names.index(promissor.id)
@@ -574,15 +587,18 @@ class Directions:
             print('Promissor should be a planet in Field Plane direction!')
             return
 
+        target_lon = self.normalize_360(self.planet[planet].lon + aspect)
         if aspect == 0:
             day = 0
         else:
             day = self.__time_to_travel(
                 planet,
-                target_lon=self.normalize_360(self.planet[planet].lon + aspect)
+                target_lon=target_lon
             )
-        lon, lat = swe.calc_ut(self.jday + day, 1)[0][:2]
+
+        lon, lat = swe.calc_ut(self.jday + day, planet)[0][:2]
         aspect_point = self.set_object('Aspect point', lon, lat)
+        # print(aspect_point.RA, promissor.RA)
 
         return self.conjunction_placidus(aspect_point, significator)
 
@@ -716,15 +732,17 @@ class Directions:
         Transfers the arc of direction into the year
         according to vertical arc measure
         """
-
-        progressed_v = swe.houses_armc(
-            self.normalize_360(self.RAIC + arc),
+        # Longitude of zodiac which crosses
+        # prime vertical at the moment (y_loc
+        # = 0 in local system)
+        current_v = swe.houses_armc(
+            self.RAIC,
             90 - self.__geo_lat,
             self.__inclination_ecliptic()
         )[0][0]
 
-        current_v = swe.houses_armc(
-            self.RAIC,
+        progressed_v = swe.houses_armc(
+            self.normalize_360(self.RAIC + arc),
             90 - self.__geo_lat,
             self.__inclination_ecliptic()
         )[0][0]
