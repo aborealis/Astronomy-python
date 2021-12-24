@@ -22,5 +22,17 @@ Antares = dr.set_object_eqt(
 Vindemiatrix = dr.set_object_eqt(
     'Vindemiatrix',
     r_asc=(13 + 2/60) * 15,
-    decl=-(10 + 57/60)
+    decl=10 + 57/60
+)
+
+Regul = dr.set_object_eqt(
+    'Regul',
+    r_asc=(10 + 6/60) * 15,
+    decl=11 + 58/60
+)
+
+Algol = dr.set_object_eqt(
+    'Algol',
+    r_asc=(3 + 8/60) * 15,
+    decl=40 + 57/60
 )

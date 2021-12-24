@@ -27,6 +27,8 @@ class Directions:
 
         self.__sin_e = sin(self.__inclination_ecliptic() / 180 * pi)
         self.__cos_e = cos(self.__inclination_ecliptic() / 180 * pi)
+        self.__sin_phi = sin(data['lat'] / 180 * pi)
+        self.__cos_phi = cos(data['lat'] / 180 * pi)
         self.__tan_phi = tan(data['lat'] / 180 * pi)
 
         # A list of house cusps longitudes
@@ -45,6 +47,9 @@ class Directions:
 
         # Real ascension IC
         self.RAIC = self.normalize_360(self.RAMC + 180)
+
+        # Local sidereal time
+        self.LST = self.RAMC / 15
 
         self.planet = []
         self.__planet_names = [
@@ -84,6 +89,7 @@ class Directions:
             'id',
             'x_ecl', 'y_ecl', 'z_ecl',  # ecliptical xyz
             'x_eqt', 'y_eqt', 'z_eqt',  # equatorial xyz
+            'x_loc', 'y_loc', 'z_loc',  # local horz xyz
             'RA', 'D',  # real ascension and declination
             'lon', 'lat',  # ecliptical lon & lat
             'AD', 'AD2',  # ascension diff. type 1 and 2
@@ -157,6 +163,34 @@ class Directions:
 
         return self.Point_Cartasian(x_ect, y_ect, z_ect)
 
+    def __xyz_loc_from_xyz_eqt(self,
+                               point: Point_Cartasian
+                               ) -> Point_Cartasian:
+        """
+        Transfers XYZ from equator to XYZ local horizon.
+        x_loc directed to East Point
+        y_loc directed to North Point
+        z_loc directed to Azimuth
+        """
+        # time since Aries raising (tsa, in radians)
+        tsa = (self.LST * 15 + 90) / 180 * pi
+
+        sin_t = sin(tsa)
+        cos_t = cos(tsa)
+
+        sin_p = self.__sin_phi
+        cos_p = self.__cos_phi
+
+        x_loc = cos_t * point.x + sin_t * point.y
+        y_loc = (- sin_p * sin_t * point.x
+                 + sin_p * cos_t * point.y
+                 + cos_p * point.z)
+        z_loc = (cos_p * sin_t * point.x -
+                 cos_p * cos_t * point.y +
+                 sin_p * point.z)
+
+        return self.Point_Cartasian(x_loc, y_loc, z_loc)
+
     def __xyz_from_lat_lon(self,
                            lon_ecl: float,
                            lat_ecl: float) -> Point_Cartasian:
@@ -228,6 +262,12 @@ class Directions:
         of horizon raising of celestial body from
         its declination. AD = on geo latitude 0
         """
+        multiplication = self.__tan_phi * tan(decl/180*pi)
+
+        # The object never raises over horizon
+        if abs(multiplication) > 1:
+            return None
+
         return asin(self.__tan_phi *
                     tan(decl/180*pi)) / pi * 180
 
@@ -275,6 +315,7 @@ class Directions:
         # astronomical data prepared here
         xyz_ecl = self.__xyz_from_lat_lon(lon_ecl, lat_ecl)
         xyz_eqt = self.__xyz_eqt_from_xyz_ecl(xyz_ecl)
+        xyz_loc = self.__xyz_loc_from_xyz_eqt(xyz_eqt)
         r_asc, decl = self.__lon_lat_from_xyz(xyz_eqt)
         asc_diff = self.__ad_from_dec(decl)
 
@@ -283,21 +324,29 @@ class Directions:
         upper_md = upper_md if upper_md < 180 else 360 - upper_md
         lower_md = lower_md if lower_md < 180 else 360 - upper_md
 
-        day_sa = 90 + asc_diff
-        night_sa = 90 - asc_diff
+        day_sa = 90 + asc_diff if asc_diff else None
+        night_sa = 90 - asc_diff if asc_diff else None
 
-        # If celestial object above or below the horizon
-        if upper_md > day_sa or lower_md < night_sa:
-            above_horizon = False
-        else:
-            above_horizon = True
+        # if body can raise over horizon
+        if asc_diff:
 
-        # To the east or west
-        east_point_ra = self.normalize_360(self.RAMC + 90)
-        if self.shortest_distance(east_point_ra, r_asc) < 90:
-            to_the_east = True
+            # If celestial object above or below the horizon
+            if upper_md > day_sa or lower_md < night_sa:
+                above_horizon = False
+            else:
+                above_horizon = True
+
+            # To the east or west
+            east_point_ra = self.normalize_360(self.RAMC + 90)
+            if self.shortest_distance(east_point_ra, r_asc) < 90:
+                to_the_east = True
+            else:
+                to_the_east = False
+
+        # if body never raise or descend
         else:
-            to_the_east = False
+            above_horizon = True if xyz_loc.z > 0 else False
+            to_the_east = True if xyz_loc.x > 0 else False
 
         if above_horizon:
             quadrant = 4 if to_the_east else 3
@@ -312,6 +361,9 @@ class Directions:
             x_eqt=xyz_ecl.x,
             y_eqt=xyz_eqt.y,
             z_eqt=xyz_eqt.z,
+            x_loc=xyz_loc.x,
+            y_loc=xyz_loc.y,
+            z_loc=xyz_loc.z,
             RA=r_asc,
             D=decl,
             lon=lon_ecl,
@@ -323,7 +375,7 @@ class Directions:
             DSA=day_sa,
             NSA=night_sa,
             quadrant=quadrant,
-            OA=r_asc - asc_diff,
+            OA=r_asc - asc_diff if asc_diff else None,
         )
 
     def create_vertex(self,
@@ -385,6 +437,11 @@ class Directions:
         ascention where it 'conjuncts' the 2nd
         objects according Placidus
         """
+        # If object never raises or descends this
+        # method is not applicable
+        if not isinstance(obj2.AD, float):
+            return None
+
         if obj2.quadrant == 4:
             ratio = obj2.UMD / obj2.DSA
             target_ra = self.RAMC + obj1.DSA * ratio
@@ -439,6 +496,11 @@ class Directions:
         should pass meets target real ascention degree
         (aspect point) in placudus algorythm
         """
+        # if object never raises or descends
+        # this method is not applicable
+        if not isinstance(significator.AD, float):
+            return None
+
         # The point which will raise over horizon
         # after significator's ascension in N hours.
         # 8 hrs = Trine
@@ -467,6 +529,11 @@ class Directions:
         should pass meets target real ascention degree
         (aspect point) in oblique ascention algorithm
         """
+        # If significator never raises ot descends
+        # this method is not applicable
+        if not isinstance(significator.AD, float):
+            return None
+
         # The point which will raise over horizon
         # after significator's ascension in N hours.
         # 8 hrs = Trine
@@ -551,7 +618,7 @@ class Directions:
 
     def __time_to_travel_sun(self, target_lon: float) -> float:
         """
-        Returns the number of days the Sun needs to 
+        Returns the number of days the Sun needs to
         reach a certain longitute on ecliptic plane
         Always returns positive number
         """
@@ -663,7 +730,7 @@ class Directions:
 
     def show_date(self, age: float) -> str:
         """
-        Transfers the number of years derived 
+        Transfers the number of years derived
         from into directions into a future date
         and prints result into a string
         """
