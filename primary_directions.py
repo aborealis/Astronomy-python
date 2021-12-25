@@ -412,7 +412,7 @@ class Directions:
             r_asc = self.normalize_360(self.RAMC - obj.UMD)
         else:
             r_asc = self.normalize_360(self.RAMC + obj.UMD)
-        return self.set_object_eqt('||', r_asc, decl)
+        return self.set_object_eqt(f'||{obj.id}', r_asc, decl)
 
     def create_cont_parallel(self,
                              obj: Celestial_Object) -> Celestial_Object:
@@ -426,7 +426,7 @@ class Directions:
         else:
             r_asc = self.RAMC - obj.LMD
 
-        return self.set_object_eqt('contr-||', r_asc, decl)
+        return self.set_object_eqt(f'-||{obj.id}', r_asc, decl)
 
     def conjunction_placidus(self,
                              obj1: Celestial_Object,
@@ -749,6 +749,7 @@ class Directions:
 
         sun_lon = self.planet[0].lon
         target_lon = progressed_v - current_v + sun_lon
+        target_lon = self.normalize_360(target_lon)
 
         return self.__time_to_travel_sun(target_lon)
 
