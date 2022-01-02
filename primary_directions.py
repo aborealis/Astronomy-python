@@ -536,24 +536,22 @@ class Directions:
                  if significator.quadrant in [4, 3] else
                  significator.LMD / significator.NSA)
 
-        # The arc of celestial eqiator from East Point
-        # to the quadrant where significator is. The
-        # end point of the arc has the same % of
-        # deviation from horizon/meridian as the
-        # significator on its semi-arc
+        # The RA of the point on the equator
+        # which "conjuncts" significator by
+        # semi-arc proportions
         if significator.quadrant == 1:
-            arc = 90 - ratio * 90
+            ra = self.RAIC - ratio * 90
         elif significator.quadrant == 2:
-            arc = 90 + ratio * 90
+            ra = self.RAIC + ratio * 90
         elif significator.quadrant == 3:
-            arc = 270 - ratio * 90
+            ra = self.RAMC - ratio * 90
         else:
-            arc = 270 + ratio * 90
+            ra = self.RAMC + ratio * 90
 
         aspect_point = self.set_object_eqt(
             'Aspect point',
-            self.normalize_360(self.RAMC + 90 + arc - aspect),
-            significator.D
+            r_asc=self.normalize_360(ra - aspect),
+            decl=0
         )
 
         # Significator conjuncts this point when
