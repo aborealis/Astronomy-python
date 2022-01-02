@@ -300,7 +300,9 @@ class Directions:
         """
         lon_ecl, lat_ecl = self.__lon_lat_from_ra_dec(r_asc, decl)
 
-        return self.set_object(name, lon_ecl, lat_ecl)
+        return self.set_object(name,
+                               self.normalize_360(lon_ecl),
+                               self.normalize_360(lat_ecl))
 
     def set_object(self,
                    name: str,
@@ -324,8 +326,8 @@ class Directions:
         upper_md = upper_md if upper_md < 180 else 360 - upper_md
         lower_md = lower_md if lower_md < 180 else 360 - upper_md
 
-        day_sa = 90 + asc_diff if asc_diff else None
-        night_sa = 90 - asc_diff if asc_diff else None
+        day_sa = 90 + asc_diff if isinstance(asc_diff, float) else None
+        night_sa = 90 - asc_diff if isinstance(asc_diff, float) else None
 
         # if body can raise over horizon
         if asc_diff:
@@ -543,17 +545,17 @@ class Directions:
         # which "conjuncts" significator by
         # semi-arc proportions
         if significator.quadrant == 1:
-            ra = self.RAIC - ratio * 90
+            r_asc = self.RAIC - ratio * 90
         elif significator.quadrant == 2:
-            ra = self.RAIC + ratio * 90
+            r_asc = self.RAIC + ratio * 90
         elif significator.quadrant == 3:
-            ra = self.RAMC - ratio * 90
+            r_asc = self.RAMC - ratio * 90
         else:
-            ra = self.RAMC + ratio * 90
+            r_asc = self.RAMC + ratio * 90
 
         aspect_point = self.set_object_eqt(
             'Aspect point',
-            r_asc=self.normalize_360(ra - aspect),
+            r_asc=self.normalize_360(r_asc - aspect),
             decl=0
         )
 
