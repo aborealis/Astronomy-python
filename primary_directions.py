@@ -727,7 +727,7 @@ class Directions:
             planet=0,
             target_lon=sun_lon + target_lon)
 
-        return time_to_360 + time_0_target
+        return time_to_360 + abs(time_0_target)
 
     @staticmethod
     def get_years_ptolemey(arc: float) -> float:
