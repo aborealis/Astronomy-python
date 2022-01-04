@@ -55,7 +55,7 @@ class Directions:
         self.__planet_names = [
             'SUN', 'MON', 'MER', 'VEN',
             'MAR', 'JUP', 'SAT', 'URN',
-            'NEP', 'PLT', 'SNO',
+            'NEP', 'PLT', 'NND',
         ]
         for planet_num, planet_name in enumerate(self.__planet_names):
             # Ecliptical lon/lat
@@ -815,6 +815,18 @@ class Directions:
         target_lon = self.normalize_360(target_lon)
 
         return self.__time_to_travel_sun(target_lon)
+
+    def progressed_asc(self, degrees: float) -> float:
+        """
+        Returns progressed asc - an ecliptic longitude
+        which raises after the celestial sphere rotates
+        at a given number of degrees
+        """
+        return swe.houses_armc(
+            self.normalize_360(self.RAMC + degrees),
+            self.__geo_lat,
+            self.__inclination_ecliptic()
+        )[0][0]
 
     def show_date(self, age: float) -> str:
         """
