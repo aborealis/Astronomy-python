@@ -473,6 +473,20 @@ class Directions:
 
         return arc
 
+    def __get_aspect_point_zodiaco(self,
+                                   promissor: Celestial_Object,
+                                   aspect: int,
+                                   lat_ecl: float) -> float:
+        """
+        Returns aspect point for zodiacal directions
+        with the given celestial (ecliptic) latitude
+        """
+        return self.set_object(
+            'Aspect point',
+            lon_ecl=promissor.lon + aspect,
+            lat_ecl=lat_ecl
+        )
+
     def aspect_zodiaco(self,
                        promissor: Celestial_Object,
                        significator: Celestial_Object,
@@ -480,13 +494,66 @@ class Directions:
         """
         Calculates the distance in degrees the promissor's
         aspect point should pass to meets the significator
-        in zodiac direction algorythm
+        in zodiac direction algorythm (with latitude 0)
         """
+        # if object never raises or descends
+        # this method is not applicable
+        if not isinstance(significator.AD, float):
+            return None
 
-        aspect_point = self.set_object(
-            'Aspect point',
-            lon_ecl=promissor.lon + aspect,
+        aspect_point = self.__get_aspect_point_zodiaco(
+            promissor,
+            aspect,
             lat_ecl=0.0
+        )
+
+        return self.conjunction_placidus(aspect_point, significator)
+
+    def aspect_zodiaco_lat(self,
+                           promissor: Celestial_Object,
+                           significator: Celestial_Object,
+                           aspect: int) -> float:
+        """
+        Calculates the distance in degrees the promissor's
+        aspect point should pass to meets the significator
+        in zodiac direction algorythm (with significator's
+        latitude)
+        """
+        # if object never raises or descends
+        # this method is not applicable
+        if not isinstance(significator.AD, float):
+            return None
+
+        aspect_point = self.__get_aspect_point_zodiaco(
+            promissor,
+            aspect,
+            lat_ecl=significator.lat
+        )
+
+        return self.conjunction_placidus(aspect_point, significator)
+
+    def aspect_zodiaco_byankini(self,
+                                promissor: Celestial_Object,
+                                significator: Celestial_Object,
+                                aspect: int) -> float:
+        """
+        Calculates the distance in degrees the promissor's
+        aspect point should pass to meets the significator
+        in zodiac direction algorythm (with significator's
+        latitude calculated according to Byankini formula)
+        """
+        # if object never raises or descends
+        # this method is not applicable
+        if not isinstance(significator.AD, float):
+            return None
+
+        lat = asin(sin(significator.lat/180*pi) *
+                   cos(aspect/180*pi)) / pi * 180
+
+        aspect_point = self.__get_aspect_point_zodiaco(
+            promissor,
+            aspect,
+            lat_ecl=lat
         )
 
         return self.conjunction_placidus(aspect_point, significator)
@@ -563,37 +630,6 @@ class Directions:
         # it deviates from horizon to the same ratio
         # of his day/night semi-arc, as the aspect
         # point does on the equator
-        return self.conjunction_placidus(
-            promissor,
-            aspect_point
-        )
-
-    def aspect_mundi3(self,
-                      promissor: Celestial_Object,
-                      significator: Celestial_Object,
-                      aspect: int) -> float:
-        """
-        Calculates the distance in degrees the promissor
-        should pass to meet the significator's aspect
-        point in proportional semi-arcs algorythm. Aspect
-        is the projection of significator's zodiac aspect
-        on the eqliptic plane
-        """
-        # if object never raises or descends
-        # this method is not applicable
-        if not isinstance(significator.AD, float):
-            return None
-
-        aspect_point = self.set_object(
-            'Aspect point',
-            lon_ecl=self.normalize_360(significator.lon - aspect),
-            lat_ecl=significator.lat
-        )
-
-        # Significator conjuncts this point when
-        # it deviates from horizon to the same ratio
-        # of his day/night semi-arc, as the aspect
-        # point does on the significator's hour circle
         return self.conjunction_placidus(
             promissor,
             aspect_point
