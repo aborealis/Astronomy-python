@@ -446,6 +446,9 @@ class Directions:
         ):
             return None
 
+        if abs(obj1.lon - obj2.lon) < 1e-10:
+            return 0
+
         if obj2.quadrant == 4:
             ratio = obj2.UMD / obj2.DSA
             target_ra = self.RAMC + obj1.DSA * ratio
@@ -468,8 +471,8 @@ class Directions:
         # path of direction may be applied. We need to take
         # it into account.
         arc = obj1.RA - target_ra
-        if abs(arc > 180):
-            arc = arc - 360
+        if abs(arc) > 180:
+            arc = arc - 360 if arc > 0 else arc + 360
 
         return arc
 
