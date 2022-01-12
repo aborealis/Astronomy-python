@@ -555,7 +555,7 @@ class Directions:
         to a given one in Placidua system
         """
         decl = obj.D
-        if abs(obj.RA - (obj.UMD + self.RAMC)) < 1e-10:
+        if obj.quadrant in [4, 1]:
             r_asc = self.normalize_360(self.RAMC - obj.UMD)
         else:
             r_asc = self.normalize_360(self.RAMC + obj.UMD)
@@ -568,10 +568,14 @@ class Directions:
         parallel with a given one in Placidua system
         """
         decl = obj.D
-        if obj.quadrant in [4, 1]:
+        if obj.quadrant == 4:
             r_asc = self.RAMC + obj.LMD
-        else:
+        elif obj.quadrant == 3:
             r_asc = self.RAMC - obj.LMD
+        elif obj.quadrant == 1:
+            r_asc = self.RAIC - obj.UMD
+        else:
+            r_asc = self.RAIC + obj.LMD
 
         return self.set_object_eqt(f'-||{obj.id}', r_asc, decl)
 
