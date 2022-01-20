@@ -4,6 +4,9 @@
 A valuable class to calculate primary directions in Placidus house system. Requires swisseph library to be installed (`pip [pipenv] install pyswisseph`)
 
 ### 1.1. Basic usage
+
+To use this module you need to copy sefstars.txt file to the directory where primary_directions.py is located.
+
 #### 1.1.1. Import and Declaration
 
 Declare an object with the local time and position of the observer

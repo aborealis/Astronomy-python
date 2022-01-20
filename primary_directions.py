@@ -4,10 +4,14 @@ directions in Placidus house system.
 It requires the swisseph library to
 be installed: pip install pyswisseph
 """
+import os
 from collections import namedtuple
 from math import tan, sin, cos, asin, atan, pi
 from datetime import datetime
 import swisseph as swe
+
+curr_path = os.path.abspath(os.curdir)
+swe.set_ephe_path(curr_path)
 
 
 class Directions:
@@ -862,7 +866,7 @@ class Directions:
         for planet (0..9 - Sun..Pluto) to pass to
         a certain zodiac degree. May return negative
         days in case the target longitude is less
-        than starting point
+        than the planet's current degree
         """
         # A very approximate number of days needed for
         # a planet in average to pass 30 degree distance.
@@ -896,27 +900,20 @@ class Directions:
         reach a certain longitute on ecliptic plane
         Always returns positive number
         """
-        sun_lon = self.planet[0].lon
 
         # Shortest time may be negative
-        # if shortest direction from the Sun
-        # to target degree is a backword dir-n
+        # if target longitude is less than
+        # Sun's longitude
         shortest_time = self.__time_to_travel(
             planet=0,
             target_lon=target_lon)
 
-        # If normal direction
+        # If Sun's degree > target degree
         if target_lon > self.planet[0].lon:
             return shortest_time
 
         # Retro movement
-        time_to_360 = self.__time_to_travel(
-            planet=0, target_lon=359.99)
-        time_0_target = self.__time_to_travel(
-            planet=0,
-            target_lon=sun_lon + target_lon)
-
-        return time_to_360 + abs(time_0_target)
+        return 365.25 + shortest_time
 
     @staticmethod
     def get_years_ptolemey(arc: float) -> float:
