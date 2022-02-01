@@ -868,9 +868,9 @@ class Directions:
         days in case the target longitude is less
         than the planet's current degree
         """
-        # A very approximate number of days needed for
-        # a planet in average to pass 30 degree distance.
-        step = [30, 2.5, 30, 30, 80, 400, 1200, 3000, 6000, 7000][planet]
+        # Approximate maximum number of days needed for
+        # a planet to pass 30 degree distance.
+        step = [30, 2.5, 45, 120, 210, 400, 1200, 3000, 6000, 7000][planet]
         _target_lon = self.normalize_360(target_lon)
 
         if _target_lon < swe.calc_ut(self.jday, planet)[0][0]:
